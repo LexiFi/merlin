@@ -406,6 +406,8 @@ and expression i ppf x =
   | Texp_pack me ->
       line i ppf "Texp_pack";
       module_expr i ppf me
+  | Texp_typath _l ->
+      line i ppf "Pexp_typath ..."
   | Texp_unreachable ->
       line i ppf "Texp_unreachable"
   | Texp_extension_constructor (li, _) ->
@@ -804,6 +806,9 @@ and structure_item i ppf x =
   | Tstr_attribute (s, arg) ->
       line i ppf "Tstr_attribute \"%s\"\n" s.txt;
       Printast.payload i ppf arg
+  | Tstr_usettype e ->
+      line i ppf "Pstr_usettype\n";
+      expression i ppf e
 
 and longident_x_with_constraint i ppf (li, _, wc) =
   line i ppf "%a\n" fmt_path li;

@@ -346,6 +346,13 @@ let of_expression_desc loc = function
     of_module_expr me
   | Texp_unreachable | Texp_extension_constructor _ ->
     id_fold
+  | Texp_typath steps ->
+    list_fold (function
+        | Ttypath_constructor _ | Ttypath_field _ | Ttypath_tuple _ ->
+          id_fold
+        | Ttypath_list e | Ttypath_array e ->
+          of_expression e
+      ) steps
 
 and of_exp_extra (exp,_,_) = match exp with
   | Texp_constraint ct ->
@@ -438,6 +445,8 @@ and of_structure_item_desc = function
   | Tstr_open d ->
     app (Open_description d)
   | Tstr_attribute _ ->
+    id_fold
+  | Tstr_usettype _ ->
     id_fold
 
 and of_module_type_desc = function

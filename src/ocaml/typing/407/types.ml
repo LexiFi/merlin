@@ -39,6 +39,7 @@ and type_desc =
   | Tunivar of string option
   | Tpoly of type_expr * type_expr list
   | Tpackage of Path.t * Longident.t list * type_expr list
+  | Tprop of string core_type_properties * type_expr
 
 and row_desc =
     { row_fields: (label * row_field) list;
@@ -323,12 +324,12 @@ and constructor_tag =
   | Cstr_extension of Path.t * bool     (* Extension constructor
                                            true if a constant false if a block*)
 
-let equal_tag t1 t2 = 
+let equal_tag t1 t2 =
   match (t1, t2) with
   | Cstr_constant i1, Cstr_constant i2 -> i2 = i1
   | Cstr_block i1, Cstr_block i2 -> i2 = i1
   | Cstr_unboxed, Cstr_unboxed -> true
-  | Cstr_extension (path1, b1), Cstr_extension (path2, b2) -> 
+  | Cstr_extension (path1, b1), Cstr_extension (path2, b2) ->
       Path.same path1 path2 && b1 = b2
   | (Cstr_constant _|Cstr_block _|Cstr_unboxed|Cstr_extension _), _ -> false
 
@@ -360,3 +361,22 @@ let signature_item_id = function
   | Sig_class (id, _, _)
   | Sig_class_type (id, _, _)
     -> id
+
+let val_approx vd =
+  let open Parsetree in
+  let rec loop = function
+    | ({txt="mlfi.value_approx"},
+       PStr [{pstr_desc=Pstr_eval
+                  ({pexp_desc =
+                      Pexp_constant (Pconst_string (s, _))}, _)}]) :: _ ->
+        Some s
+    | _ :: tl -> loop tl
+    | [] -> None
+  in
+  loop vd.val_attributes
+
+let approx_attr s =
+  let open Ast_helper in
+  let open Parsetree in
+  Location.mknoloc "mlfi.value_approx",
+  PStr [Str.eval (Exp.constant (Pconst_string (s, None)))]

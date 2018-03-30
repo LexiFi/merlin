@@ -24,6 +24,11 @@ open Docstrings
 open Docstrings.WithMenhir
 open Msupport_parsing
 
+let rec list_last = function
+  | [hd] -> hd
+  | _ :: tl -> list_last tl
+  | [] -> assert false
+
 let mkloc = Location.mkloc
 let mknoloc = Location.mknoloc
 
@@ -82,6 +87,12 @@ let ghsig ~loc d = Sig.mk ~loc:{ loc with Location.loc_ghost = true } d
 
 let mkinfix ~loc ~oploc arg1 name arg2 =
   mkexp ~loc (Pexp_apply(mkoperator name oploc, [Nolabel, arg1; Nolabel, arg2]))
+
+let const_int ~loc i =
+  mkexp ~loc (Pexp_constant (Pconst_integer (string_of_int i, None)))
+
+let gh_const_int ~loc i =
+  ghexp ~loc (Pexp_constant (Pconst_integer (string_of_int i, None)))
 
 let neg_string f =
   if String.length f > 0 && f.[0] = '-'
@@ -215,16 +226,31 @@ let bigarray_set ~loc arr arg newval =
                         Nolabel, ghexp(Pexp_array coords);
                         Nolabel, newval]))
 
+let ghfct_apply ~loc name args =
+  let args = List.map (fun arg -> (Nolabel, arg)) args in
+  mkexp ~loc (Pexp_apply(mkexp ~loc (Pexp_ident(mknoloc (Longident.parse name))), args))
+
+let apply_use_ttype ~loc t e = ghfct_apply ~loc "Mlfi_types.__use_ttype" [t; e]
+
+let type_of_of_type ~loc t1 t2 =
+  if t1 = None || t2 <> None then syntax_error loc;
+  match t1, t2 with
+  | Some t1, None ->
+      ghfct_apply ~loc "Mlfi_types.internal_ttype_of" [ghexp ~loc (Pexp_constraint(ghexp ~loc (Pexp_assert (ghexp ~loc (Pexp_construct(mknoloc (Lident "false"), None)))), t1))]
+  | _ -> assert false
+
 let lapply p1 p2 =
-  if not !Clflags.applicative_functors then 
+  if not !Clflags.applicative_functors then
     raise_error  (Syntaxerr.Error(Syntaxerr.Applicative_path (symbol_rloc())));
   Lapply(p1, p2)
 
 let exp_of_label ~loc lbl pos =
-  mkexp ~loc (Pexp_ident(mkrhs (Lident(Longident.last lbl)) pos))
+  let e = mkexp ~loc (Pexp_ident(mkrhs (Lident(Longident.last lbl)) pos)) in
+  {e with pexp_attributes = [{loc=Location.none; txt="mlfi.punning"}, PStr[]]}
 
 let pat_of_label ~loc lbl pos =
-  mkpat ~loc (Ppat_var (mkrhs (Longident.last lbl) pos))
+  let p = mkpat ~loc (Ppat_var (mkrhs (Longident.last lbl) pos)) in
+  {p with ppat_attributes = [{loc=Location.none; txt="mlfi.punning"}, PStr[]]}
 
 let mk_newtypes ~loc newtypes exp =
   let mkexp = mkexp ~loc in
@@ -245,6 +271,14 @@ let wrap_exp_attrs ~loc body (ext, attrs) =
   match ext with
   | None -> body
   | Some id -> ghexp(Pexp_extension (id, PStr [mkstrexp body []]))
+
+let attribute_of_type_props l =
+  let props = List.map (fun (k, e) -> mknoloc (Lident k), e) l in
+  mknoloc "mlfi.dyn", PStr[Ast_helper.Str.eval (Ast_helper.Exp.record props None)]
+
+let attributes_of_type_props = function
+  | [] -> []
+  | l -> [attribute_of_type_props l]
 
 let mkexp_attrs ~loc d attrs =
   wrap_exp_attrs ~loc (mkexp ~loc d) attrs
@@ -354,7 +388,7 @@ let val_of_let_bindings ~loc lbs =
   | None -> str
   | Some id -> ghstr ~loc (Pstr_extension((id, PStr [str]), []))
 
-let expr_of_let_bindings ~loc lbs body =
+let expr_of_let_bindings ~loc ?(attrs = []) lbs body =
   let bindings =
     List.map
       (fun lb ->
@@ -363,7 +397,7 @@ let expr_of_let_bindings ~loc lbs body =
       lbs.lbs_bindings
   in
     mkexp_attrs ~loc (Pexp_let(lbs.lbs_rec, List.rev bindings, body))
-      (lbs.lbs_extension, [])
+      (lbs.lbs_extension, attrs)
 
 let class_of_let_bindings ~loc lbs body =
   let bindings =
@@ -473,6 +507,11 @@ let expr_of_lwt_bindings ~loc lbs body =
   let string_of_STRING = function
     | s, Some s' -> Printf.sprintf "STRING(%S,%S)" s s'
     | s, None -> Printf.sprintf "STRING(%S)" s
+
+  let string_of_DATE n = Printf.sprintf "DATE(%d)" n
+  let string_of_DATE_OBS n = Printf.sprintf "DATE_OBS(%d)" n
+  let string_of_INT_OBS n = Printf.sprintf "INT_OBS(%d)" n
+  let string_of_FLOAT_OBS s = Printf.sprintf "FLOAT_OBS(%s)" s
 ]
 
 %[@recovery.header
@@ -556,6 +595,12 @@ let expr_of_lwt_bindings ~loc lbs body =
 #define ghloc (ghloc ~loc:$loc)
 #define ghstr (ghstr ~loc:$loc)
 
+#define const_int (const_int ~loc:$loc)
+#define gh_const_int (gh_const_int ~loc:$loc)
+#define type_of_of_type (type_of_of_type ~loc:$loc)
+#define ghfct_apply (ghfct_apply ~loc:$loc)
+#define apply_use_ttype (apply_use_ttype ~loc:$loc)
+
 #define mk_newtypes (mk_newtypes ~loc:$loc)
 #define val_of_let_bindings (val_of_let_bindings ~loc:$loc)
 #define expr_of_let_bindings (expr_of_let_bindings ~loc:$loc)
@@ -606,6 +651,10 @@ let expr_of_lwt_bindings ~loc lbs body =
 %token COLONGREATER [@symbol ":>"]
 %token COMMA [@symbol ","]
 %token CONSTRAINT [@symbol "constraint"]
+%token <int> DATE [@cost 1] [@recovery 0]
+                  [@printer string_of_DATE]
+%token <int> DATE_OBS [@cost 1] [@recover 0]
+                      [@printer string_of_DATE_OBS]
 %token DO [@symbol "do"]
 %token DONE [@symbol "done"]
 %token DOT [@symbol "."]
@@ -620,6 +669,8 @@ let expr_of_lwt_bindings ~loc lbs body =
 %token FALSE [@symbol "false"]
 %token <string * char option> FLOAT [@cost 2] [@recovery ("0.",None)]
                                     [@printer string_of_FLOAT]
+%token <string> FLOAT_OBS [@cost 2] [@recovery ("0.")]
+                                    [@printer string_of_FLOAT_OBS]
 
 %token FOR [@symbol "for"]
 %token FUN [@symbol "fun"]
@@ -641,6 +692,8 @@ let expr_of_lwt_bindings ~loc lbs body =
 %token INITIALIZER [@symbol "initializer"]
 %token <string * char option> INT [@cost 1] [@recovery ("0",None)]
                                   [@printer string_of_INT]
+%token <int> INT_OBS [@cost 1] [@recovery 0]
+                               [@printer string_of_INT_OBS]
 %token <string> LABEL [@cost 2] [@recovery "_"][@printer Printf.sprintf "LABEL(%S)"] [@symbol "label"]
 %token LAZY [@symbol "lazy"]
 %token LBRACE [@symbol "{"]
@@ -786,7 +839,7 @@ The precedences must be listed from low to high.
 %nonassoc below_DOT
 %nonassoc DOT DOTOP
 /* Finally, the first tokens of simple_expr are above everything else. */
-%nonassoc BACKQUOTE BANG BEGIN CHAR FALSE FLOAT INT
+%nonassoc BACKQUOTE BANG BEGIN CHAR FALSE DATE DATE_OBS FLOAT FLOAT_OBS INT INT_OBS
           LBRACE LBRACELESS LBRACKET LBRACKETBAR LIDENT LPAREN
           NEW PREFIXOP STRING TRUE UIDENT
           LBRACKETPERCENT LBRACKETPERCENTPERCENT
@@ -829,6 +882,14 @@ The precedences must be listed from low to high.
 
 implementation:
     extra_str(structure) EOF                        { $1 }
+  | SIG signature END extra_str(structure) EOF
+      {
+       let sg = mkmty (Pmty_signature $2) in
+       let str = mkmod (Pmod_structure $4) in
+       let i = Incl.mk (mkmod (Pmod_constraint(str, sg))) ~attrs:[]
+           ~loc:(symbol_rloc()) in
+       [ mkstr(Pstr_include i) ]
+      }
 ;
 interface:
     extra_sig(signature) EOF                        { $1 }
@@ -959,6 +1020,20 @@ structure_tail:
       { let (body, ext) = $1 in mkstr_ext (Pstr_include body) ext }
   | item_extension post_item_attributes
       { mkstr(Pstr_extension ($1, (add_docs_attrs (symbol_docs ()) $2))) }
+  | LET TYPE EQUAL seq_expr
+      {
+        let t = mktyp (Ptyp_constr(mknoloc (Ldot (Lident "Mlfi_types", "ttype")), [mktyp(Ptyp_any)])) in
+        let e = mkexp (Pexp_constraint($4, t)) in
+        let payload = PStr[Ast_helper.Str.eval e] in
+        mkstr (Pstr_extension ((mknoloc "mlfi.lettype", payload), []))
+      }
+  | LET TYPE COLON core_type EQUAL seq_expr
+      {
+       let t = mktyp (Ptyp_constr(mknoloc (Ldot (Lident "Mlfi_types", "ttype")), [$4])) in
+       let e = mkexp (Pexp_constraint($6, t)) in
+       let payload = PStr[Ast_helper.Str.eval e] in
+       mkstr (Pstr_extension ((mknoloc "mlfi.lettype", payload), []))
+     }
   | floating_attribute
       { mark_symbol_docs ();
         mkstr(Pstr_attribute $1) }
@@ -1279,19 +1354,19 @@ value:
 ;
 method_:
 /* TODO: factorize those rules... */
-    override_flag attributes PRIVATE VIRTUAL label COLON poly_type
+    override_flag attributes PRIVATE VIRTUAL method_label COLON poly_type
       { if $1 = Override then syntax_error(1);
         (mkloc $5 ($locof(5)), Private, Cfk_virtual $7), $2 }
-  | override_flag attributes VIRTUAL private_flag label COLON poly_type
+  | override_flag attributes VIRTUAL private_flag method_label COLON poly_type
       { if $1 = Override then syntax_error(1);
         (mkloc $5 ($locof(5)), $4, Cfk_virtual $7), $2 }
-  | override_flag attributes private_flag label strict_binding
+  | override_flag attributes private_flag method_label strict_binding
       { (mkloc $4 ($locof(4)), $3,
          Cfk_concrete ($1, ghexp(Pexp_poly ($5, None)))), $2 }
-  | override_flag attributes private_flag label COLON poly_type EQUAL seq_expr
+  | override_flag attributes private_flag method_label COLON poly_type EQUAL seq_expr
       { (mkloc $4 ($locof(4)), $3,
         Cfk_concrete ($1, ghexp(Pexp_poly($8, Some $6)))), $2 }
-  | override_flag attributes private_flag label COLON TYPE lident_list
+  | override_flag attributes private_flag method_label COLON TYPE lident_list
     DOT core_type EQUAL seq_expr
       { let exp, poly = wrap_type_annotation $7 $9 $11 in
         (mkloc $4 ($locof(4)), $3,
@@ -1348,7 +1423,7 @@ class_sig_field:
       { mkctf (Pctf_inherit $3) ~attrs:($2@$4) ~docs:(symbol_docs ()) }
   | VAL attributes value_type post_item_attributes
       { mkctf (Pctf_val $3) ~attrs:($2@$4) ~docs:(symbol_docs ()) }
-  | METHOD attributes private_virtual_flags mkrhs(label) COLON poly_type
+  | METHOD attributes private_virtual_flags mkrhs(method_label) COLON poly_type
     post_item_attributes
       {
        let (p, v) = $3 in
@@ -1478,6 +1553,14 @@ let_pattern [@recovery default_pattern ()]:
       { mkexp(Pexp_apply($1, List.rev $2)) }
   | let_bindings IN seq_expr
       { expr_of_let_bindings $1 $merloc(2,3) }
+  | LAZY let_bindings IN seq_expr
+      { expr_of_let_bindings ~attrs:[mknoloc "&lazy&", PStr []] $2 $merloc(3,4) }
+  | LET TYPE EQUAL seq_expr IN seq_expr  /*todo: attributes*/
+      { apply_use_ttype $4 $6 }
+  | LET TYPE COLON core_type EQUAL seq_expr IN seq_expr /*todo: attributes*/
+      {
+       let t = mktyp (Ptyp_constr(mknoloc (Ldot (Lident "Mlfi_types", "ttype")), [$4])) in
+       apply_use_ttype (mkexp (Pexp_constraint($6, t))) $8 }
   | LET MODULE ext_attributes mkrhs(UIDENT) module_binding_body IN seq_expr
       { mkexp_attrs (Pexp_letmodule($4, $5, $merloc(6,7))) $3 }
   | LET EXCEPTION ext_attributes let_exception_declaration IN seq_expr
@@ -1596,16 +1679,46 @@ let_pattern [@recovery default_pattern ()]:
       { mkexp_attrs (Pexp_object $3) $2 }
   (*| OBJECT ext_attributes class_structure error
       { unclosed("object", 1, "end", 4) }*)
+  | type_path_expr_list
+      { mkexp(Pexp_extension (mknoloc "mlfi.typath", Ast_helper.encode_typath (List.rev $1))) }
   | expr attribute
       { Exp.attr $1 $2 }
   (*| UNDERSCORE
-      { not_expecting(1, "wildcard \"_\"") }*)
+     { not_expecting 1 "wildcard \"_\"" }*)
+;
+type_path_expr_list:
+    type_path_expr
+      { [$1] }
+  | type_path_expr_list type_path_expr
+      { $2 :: $1 }
+;
+type_path_expr_core:
+  | mkrhs(label_longident) { Typath_field ($1, None) }
+  | INT INFIXOP3 INT {
+    (* if $2 <> "/" then expecting(2, "/"); *)
+    let f s = int_of_string (fst s) in
+      Typath_tuple (f $1, f $3)
+    }
+  | LBRACKET simple_expr RBRACKET { Typath_list $2 }
+  | LBRACKETBAR simple_expr BARRBRACKET { Typath_array $2 }
+  | mkrhs(constr_longident) { Typath_constructor ($1, None) }
+;
+type_path_expr:
+  | DOT type_path_expr_core { $2 }
+  | DOT LPAREN type_path_expr_core RPAREN { $3 }
+  | DOT LPAREN mkrhs(label_longident) COLON core_type RPAREN { Typath_field ($3, Some $5) }
+  | DOT LPAREN mkrhs(constr_longident) COLON core_type RPAREN {Typath_constructor ($3, Some $5) }
 ;
 %public simple_expr:
     mkrhs(val_longident)
       { mkexp(Pexp_ident $1) }
+  | DATE
+      { ghfct_apply "Pervasives.date_of_int"
+          [const_int $1] }
   | constant
       { mkexp(Pexp_constant $1) }
+  | const_obs
+      { $1 }
   | mkrhs(constr_longident) %prec prec_constant_constructor
       { mkexp(Pexp_construct($1, None)) }
   | name_tag %prec prec_constant_constructor
@@ -1622,8 +1735,16 @@ let_pattern [@recovery default_pattern ()]:
   (*| BEGIN ext_attributes seq_expr error
       { unclosed("begin", 1, "end", 3) }*)
   | LPAREN seq_expr type_constraint RPAREN
-      { mkexp_constraint $2 $3 }
-  | simple_expr DOT mkrhs(label_longident)
+      {
+       let (t1, t2) = $3 in
+       match !Clflags.pure_caml, $2 with
+       | false, {pexp_desc = Pexp_ident{txt = Lident "type_of"}} ->
+           ghfct_apply "Mlfi_types.stype_of_ttype" [type_of_of_type t1 t2]
+       | false, {pexp_desc = Pexp_ident{txt = Lident "ttype_of"}} ->
+           type_of_of_type t1 t2
+       | _, e -> mkexp_constraint e (t1, t2)
+     }
+   | simple_expr DOT mkrhs(label_longident)
       { mkexp(Pexp_field($1, $3)) }
   | mkrhs(mod_longident) DOT LPAREN seq_expr RPAREN
       { mkexp(Pexp_open(Fresh, $1, $4)) }
@@ -1637,6 +1758,8 @@ let_pattern [@recovery default_pattern ()]:
                          [Nolabel,$1; Nolabel,$4])) }
   (*| simple_expr DOT LPAREN seq_expr error
       { unclosed("(", 3, ")", 5) }*)
+  (*| simple_expr DOT TILDE LPAREN seq_expr error
+      { unclosed "(" 4 ")" 6 }*)
   | simple_expr DOT LBRACKET seq_expr RBRACKET
       { mkexp(Pexp_apply(ghexp(Pexp_ident(array_function "String" "get")),
                          [Nolabel,$1; Nolabel,$4])) }
@@ -1726,8 +1849,10 @@ let_pattern [@recovery default_pattern ()]:
       { mkexp(Pexp_open(Fresh, $1, mkexp (Pexp_override $4)))}
   (*| mod_longident DOT LBRACELESS field_expr_list error
       { unclosed("{<", 3, ">}", 5) }*)
-  | simple_expr SHARP mkrhs(label)
+  | simple_expr SHARP mkrhs(method_label)
       { mkexp(Pexp_send($1, $3)) }
+  | simple_expr SHARP LPAREN mkrhs(method_label) simple_labeled_expr_list RPAREN
+      { mkexp (Pexp_apply(mkexp(Pexp_send($1, $4)), List.rev $5)) }
   | simple_expr HASHOP simple_expr
       { mkinfix $1 $2 $3 }
   | LPAREN MODULE ext_attributes module_expr RPAREN
@@ -1745,6 +1870,8 @@ let_pattern [@recovery default_pattern ()]:
                     $5 )) }
   (*| mod_longident DOT LPAREN MODULE ext_attributes module_expr COLON error
       { unclosed("(", 3, ")", 8) }*)
+  | LPAREN DOT RPAREN
+      { mkexp(Pexp_extension (mknoloc "mlfi.typath", Ast_helper.encode_typath [])) }
   | extension
       { mkexp (Pexp_extension $1) }
   | QUESTIONQUESTION
@@ -2069,6 +2196,11 @@ value_description:
         Val.mk $3 $5 ~attrs:(attrs@$6)
                ~loc:(symbol_rloc()) ~docs:(symbol_docs ())
       , ext }
+  | VAL ext_attributes mkrhs(val_ident) COLON core_type EQUAL expr post_item_attributes
+      { let (ext, attrs) = $2 in
+        let attr = mknoloc "mlfi.val_expr", PStr[Ast_helper.Str.eval $7] in
+        Val.mk $3 $5 ~attrs:(attr :: (attrs@$8)) ~loc:(symbol_rloc())
+      , ext }
 ;
 
 /* Primitive declarations */
@@ -2098,11 +2230,19 @@ type_declarations:
 type_declaration:
     TYPE ext_attributes nonrec_flag optional_type_parameters mkrhs(LIDENT)
     type_kind constraints post_item_attributes
-      { let (kind, priv, manifest) = $6 in
+      { let (abstract_dynamic, kind, props, priv, manifest) = $6 in
         let (ext, attrs) = $2 in
+        let prop_attrs = attributes_of_type_props props in
+        let prop_attrs =
+          (* See in transldynamic *)
+          if abstract_dynamic then
+            (mknoloc "mlfi.abstract_dynamic", PStr []) :: prop_attrs
+          else
+            prop_attrs
+        in
         let ty =
           Type.mk $5 ~params:$4 ~cstrs:(List.rev $7) ~kind
-            ~priv ?manifest ~attrs:(attrs@$8)
+            ~priv ?manifest ~attrs:(attrs@$8@prop_attrs)
             ~loc:(symbol_rloc ()) ~docs:(symbol_docs ())
         in
           ($3, ty, ext) }
@@ -2110,9 +2250,17 @@ type_declaration:
 and_type_declaration:
     AND attributes optional_type_parameters mkrhs(LIDENT) type_kind constraints
     post_item_attributes
-      { let (kind, priv, manifest) = $5 in
+      { let (abstract_dynamic, kind, props, priv, manifest) = $5 in
+        let attrs = attributes_of_type_props props in
+        let attrs =
+          (* See in transldynamic *)
+          if abstract_dynamic then
+            (mknoloc "mlfi.abstract_dynamic", PStr []) :: attrs
+          else
+            attrs
+        in
           Type.mk $4 ~params:$3 ~cstrs:(List.rev $6)
-            ~kind ~priv ?manifest ~attrs:($2@$7) ~loc:(symbol_rloc ())
+            ~kind ~priv ?manifest ~attrs:($2@$7@attrs) ~loc:(symbol_rloc ())
             ~text:(symbol_text ()) ~docs:(symbol_docs ()) }
 ;
 constraints:
@@ -2121,27 +2269,38 @@ constraints:
 ;
 type_kind:
     /*empty*/
-      { (Ptype_abstract, Public, None) }
+      { (false, Ptype_abstract, [], Public, None) }
   | EQUAL core_type
-      { (Ptype_abstract, Public, Some $2) }
+      { (false, Ptype_abstract, [], Public, Some $2) }
+  | COLONEQUAL core_type
+      { (true, Ptype_abstract, [], Public, Some $2) }
   | EQUAL PRIVATE core_type
-      { (Ptype_abstract, Private, Some $3) }
-  | EQUAL constructor_declarations
-      { (Ptype_variant(List.rev $2), Public, None) }
-  | EQUAL PRIVATE constructor_declarations
-      { (Ptype_variant(List.rev $3), Private, None) }
+      { (false, Ptype_abstract, [], Private, Some $3) }
+  | EQUAL constructor_declarations opt_props
+      { (false, Ptype_variant (List.rev $2), $3, Public, None) }
+  | EQUAL PRIVATE constructor_declarations opt_props
+      { (false, Ptype_variant (List.rev $3), $4, Private, None) }
   | EQUAL DOTDOT
-      { (Ptype_open, Public, None) }
+      { (false, Ptype_open, [], Public, None) }
   | EQUAL PRIVATE DOTDOT
-      { (Ptype_open, Private, None) }
-  | EQUAL private_flag LBRACE label_declarations RBRACE
-      { (Ptype_record $4, $2, None) }
-  | EQUAL core_type EQUAL private_flag constructor_declarations
-      { (Ptype_variant(List.rev $5), $4, Some $2) }
+      { (false, Ptype_open, [], Private, None) }
+  | EQUAL private_flag LBRACE label_declarations RBRACE opt_props
+      { (false, Ptype_record $4, $6, $2, None) }
+  | EQUAL core_type EQUAL private_flag constructor_declarations opt_props
+      { (false, Ptype_variant(List.rev $5), $6, $4, Some $2) }
+  | COLONEQUAL core_type EQUAL private_flag constructor_declarations opt_props
+      { (true, Ptype_variant(List.rev $5), $6, $4, Some $2) }
   | EQUAL core_type EQUAL private_flag DOTDOT
-      { (Ptype_open, $4, Some $2) }
-  | EQUAL core_type EQUAL private_flag LBRACE label_declarations RBRACE
-      { (Ptype_record $6, $4, Some $2) }
+      { (false, Ptype_open, [], $4, Some $2) }
+  | EQUAL core_type EQUAL private_flag LBRACE label_declarations RBRACE opt_props
+      { (false, Ptype_record $6, $8, $4, Some $2) }
+  | COLONEQUAL core_type EQUAL private_flag LBRACE label_declarations RBRACE opt_props
+      { (true, Ptype_record $6, $8, $4, Some $2) }
+;
+opt_props:
+  /*empty*/
+    { [] }
+  | WITH LBRACKET with_propss RBRACKET { $3 }
 ;
 optional_type_parameters:
     /*empty*/                                   { [] }
@@ -2183,18 +2342,20 @@ constructor_declarations:
   | constructor_declarations bar_constructor_declaration { $2 :: $1 }
 ;
 constructor_declaration:
-  | mkrhs(constr_ident) generalized_constructor_arguments attributes
+  | mkrhs(constr_ident) opt_plus_props generalized_constructor_arguments attributes
       {
-       let args,res = $2 in
-       Type.constructor $1 ~args ?res ~attrs:$3
+       let args,res = $3 in
+       let attrs = (attributes_of_type_props $2) @ $4 in
+       Type.constructor $1 ~args ?res ~attrs
          ~loc:(symbol_rloc()) ~info:(symbol_info ())
       }
 ;
 bar_constructor_declaration:
-  | BAR mkrhs(constr_ident) generalized_constructor_arguments attributes
+  | BAR mkrhs(constr_ident) opt_plus_props generalized_constructor_arguments attributes
       {
-       let args,res = $3 in
-       Type.constructor $2 ~args ?res ~attrs:$4
+       let args,res = $4 in
+       let attrs = (attributes_of_type_props $3) @ $5 in
+       Type.constructor $2 ~args ?res ~attrs
          ~loc:(symbol_rloc()) ~info:(symbol_info ())
       }
 ;
@@ -2240,21 +2401,55 @@ label_declarations:
   | label_declaration_semi label_declarations   { $1 :: $2 }
 ;
 label_declaration:
-    mutable_flag mkrhs(label) COLON poly_type_no_attr attributes
+    mutable_flag label_longident opt_plus_props COLON poly_type_no_attr attributes
       {
-       Type.field $2 $4 ~mut:$1 ~attrs:$5
+       let l = Longident.flatten $2 in
+       if List.length l <> 1 then syntax_error(2);
+       let attrs = (attributes_of_type_props $3) @ $6 in
+       Type.field ($mkrhs((list_last l), 2)) $5 ~mut:$1 ~attrs
          ~loc:(symbol_rloc()) ~info:(symbol_info ())
       }
-;
-label_declaration_semi:
-    mutable_flag mkrhs(label) COLON poly_type_no_attr attributes SEMI attributes
+  | mutable_flag label_longident opt_plus_props attributes
       {
+       (* if Warnings.is_active (Warnings.Punning_definitions "") then
+         Location.prerr_warning (rhs_loc 2) (Warnings.Punning_definitions (Longident.last $2)); *)
+       let l = Longident.flatten $2 in
+       let attrs = (attributes_of_type_props $3) @ $4 in
+       Type.field ($mkrhs((list_last l), 2)) (ghtyp(Ptyp_constr(mknoloc $2, []))) ~mut:$1 ~attrs
+         ~loc:(symbol_rloc())  ~info:(symbol_info ())
+      }
+;
+opt_plus_props:
+     /*empty*/ { [] }
+  |  PLUS LBRACKET with_propss RBRACKET { $3 }
+;
+
+label_declaration_semi:
+    mutable_flag label_longident opt_plus_props COLON poly_type_no_attr attributes SEMI attributes
+      {
+       let l = Longident.flatten $2 in
+       if List.length l <> 1 then syntax_error(2);
+       let attrs = (attributes_of_type_props $3) @ $6 @ $8 in
        let info =
-         match rhs_info(5) with
+         match rhs_info(6) with
          | Some _ as info_before_semi -> info_before_semi
          | None -> symbol_info ()
        in
-       Type.field $2 $4 ~mut:$1 ~attrs:($5 @ $7)
+       Type.field ($mkrhs((list_last l), 2)) $5 ~mut:$1 ~attrs
+         ~loc:(symbol_rloc()) ~info
+      }
+  | mutable_flag label_longident opt_plus_props attributes SEMI attributes
+      {
+       (* if Warnings.is_active (Warnings.Punning_definitions "") then
+         Location.prerr_warning (rhs_loc 2) (Warnings.Punning_definitions (Longident.last $2)); *)
+       let l = Longident.flatten $2 in
+       let attrs = (attributes_of_type_props $3) @ $4 @ $6 in
+       let info =
+         match rhs_info(4) with
+         | Some _ as info_before_semi -> info_before_semi
+         | None -> symbol_info ()
+       in
+       Type.field ($mkrhs((list_last l), 2)) (ghtyp(Ptyp_constr(mknoloc $2, []))) ~mut:$1 ~attrs
          ~loc:(symbol_rloc()) ~info
       }
 ;
@@ -2374,6 +2569,20 @@ poly_type_no_attr:
 
 /* Core types */
 
+with_props:
+    with_prop                             { [$1] }
+  | with_props SEMI with_prop        { $3 :: $1 }
+;
+with_prop:
+    LIDENT EQUAL expr {$1, $3}
+  | LIDENT {$1, ghexp(Pexp_constant(Pconst_string ("", None)))}
+;
+
+with_propss:
+      {[]}
+  | with_props {List.rev $1}
+  | with_props SEMI {List.rev $1}
+;
 core_type:
     core_type_no_attr
       { $1 }
@@ -2383,6 +2592,9 @@ core_type:
 core_type_no_attr:
     core_type2 %prec MINUSGREATER
       { $1 }
+
+  | core_type2 PLUS LBRACKET with_propss RBRACKET
+      { Typ.attr $1 (attribute_of_type_props $4) }
   | core_type2 AS QUOTE ident
       { mktyp(Ptyp_alias($1, $4)) }
 ;
@@ -2508,12 +2720,12 @@ meth_list:
   | DOTDOT                                      { [], Open }
 ;
 field:
-  mkrhs(label) COLON poly_type_no_attr attributes
+  mkrhs(method_label) COLON poly_type_no_attr attributes
     { Otag ($1, add_info_attrs (symbol_info ()) $4, $3) }
 ;
 
 field_semi:
-  mkrhs(label) COLON poly_type_no_attr attributes SEMI attributes
+  mkrhs(method_label) COLON poly_type_no_attr attributes SEMI attributes
     { let info =
         match rhs_info(4) with
         | Some _ as info_before_semi -> info_before_semi
@@ -2528,6 +2740,10 @@ inherit_field_semi:
 
 label:
     LIDENT                                      { $1 }
+;
+method_label:
+    UIDENT                                      { $1 }
+  | LIDENT                                      { $1 }
 ;
 
 /* Constants */
@@ -2544,6 +2760,19 @@ signed_constant:
   | MINUS FLOAT  { let (f, m) = $2 in Pconst_float("-" ^ f, m) }
   | PLUS INT     { let (n, m) = $2 in Pconst_integer (n, m) }
   | PLUS FLOAT   { let (f, m) = $2 in Pconst_float(f, m) }
+;
+
+const_obs:
+  | INT_OBS
+      { mkexp(Pexp_apply(ghexp(Pexp_ident(mknoloc (Lident "obs_of_int"))),
+                         ([Nolabel, gh_const_int $1]))) }
+  | FLOAT_OBS
+      { mkexp(Pexp_apply(ghexp(Pexp_ident(mknoloc (Lident "obs_of_float"))),
+                         ([Nolabel, ghexp(Pexp_constant(Pconst_float ($1, None)))]))) }
+  | DATE_OBS
+      { mkexp(Pexp_apply(ghexp(Pexp_ident(mknoloc (Lident "obs_of_date"))),
+                         ([Nolabel, ghexp (Pexp_apply(ghexp(Pexp_ident(mknoloc (Lident "date_of_int"))),
+                                                 ([Nolabel, gh_const_int $1])))]))) }
 ;
 
 /* Identifiers and long identifiers */
@@ -2646,9 +2875,9 @@ class_longident:
 
 %inline toplevel_payload:
     /* Empty */ { None }
-  | STRING      { let (s, d) = $1 in 
+  | STRING      { let (s, d) = $1 in
                   Some (Exp.constant (Pconst_string (s, d) )) }
-  | INT         { let (n, m) = $1 in 
+  | INT         { let (n, m) = $1 in
                   Some (Exp.constant (Pconst_integer (n, m))) }
   | val_longident | mod_longident { Some (Exp.ident (mkloc $1 ($loc))) }
   | FALSE       { Some (Exp.construct (mkloc (Longident.Lident "false") ($loc)) None) }
@@ -2658,7 +2887,7 @@ class_longident:
 toplevel_directive:
   SHARP ident toplevel_payload
     { let id = mkloc ("merlin.directive." ^ $2) ($locof(2)) in
-      let payload = 
+      let payload =
         match $3 with
         | None -> PStr []
         | Some exp -> PStr [mkstrexp exp []]

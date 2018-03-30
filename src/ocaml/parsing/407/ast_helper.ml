@@ -554,6 +554,112 @@ module Csig = struct
     }
 end
 
+(* BEGIN LEXIFI *)
+let get_props (attrs : attributes) =
+  List.fold_right
+    (fun (k, v) acc ->
+       match k, v with
+       | {txt="mlfi.dyn"}, PStr[{pstr_desc=Pstr_eval ({pexp_desc=Pexp_record (props, None)}, [])}] ->
+           List.map (fun (k, e) -> Longident.last k.txt, e) props :: acc
+       | _ -> acc
+    )
+    attrs
+    []
+
+let get_str_props attrs =
+  List.map
+    (List.map
+       (function
+         | (k, {pexp_desc=Pexp_constant (Pconst_string (s, _))}) -> (k, s)
+         | _ -> assert false
+       )
+    )
+    (get_props attrs)
+
+let map_props f (attrs : attributes) =
+  List.map
+    (function
+      | {txt="mlfi.dyn"} as k, PStr[{pstr_desc=Pstr_eval ({pexp_desc=Pexp_record (props, None)} as e, [])} as p] ->
+          let props = List.map (fun (k, e) -> (k, f e)) props in
+          let e = {e with pexp_desc=Pexp_record (props, None)} in
+          (k, PStr[{p with pstr_desc=Pstr_eval (e, [])}])
+      | x -> x
+    )
+    attrs
+
+let type_props sdecl =
+  match sdecl.ptype_kind with
+  | Ptype_variant cstrs ->
+      List.map (fun c -> List.flatten (get_props c.pcd_attributes)) cstrs
+  | Ptype_record lbls ->
+      List.map (fun l -> List.flatten (get_props l.pld_attributes)) lbls
+  | _ ->
+      []
+
+type typath_step =
+  | Typath_constructor of Longident.t Location.loc * core_type option
+  | Typath_field of Longident.t Location.loc * core_type option
+  | Typath_tuple of int * int
+  | Typath_list of expression
+  | Typath_array of expression
+
+let encode_typath_step step =
+  let cstr s arg = Exp.construct (Location.mknoloc (Longident.Lident s)) (Some arg) in
+  match step with
+  | Typath_constructor (lid, None) ->
+      cstr "Constructor" (Exp.ident lid)
+  | Typath_constructor (lid, Some ty) ->
+      cstr "Constructor" (Exp.constraint_ (Exp.ident lid) ty)
+  | Typath_field (lid, None) ->
+      cstr "Field" (Exp.ident lid)
+  | Typath_field (lid, Some ty) ->
+      cstr "Field" (Exp.constraint_ (Exp.ident lid) ty)
+  | Typath_tuple (i, j) ->
+      cstr "Tuple" (Exp.tuple [Exp.constant (Pconst_integer (string_of_int i, None)); Exp.constant (Pconst_integer (string_of_int j, None))])
+  | Typath_list e ->
+      cstr "List" e
+  | Typath_array e ->
+      cstr "Array" e
+
+let encode_typath steps =
+  PStr (List.map (fun s -> Str.eval (encode_typath_step s)) steps)
+
+let decode_typath_step e =
+  let open Longident in
+  let constr, arg =
+    match e.pexp_desc with
+    | Pexp_construct ({txt=Lident s}, Some arg) -> s, arg
+    | _ -> assert false
+  in
+  match constr, arg with
+  | "Constructor", {pexp_desc = Pexp_ident lid} ->
+      Typath_constructor (lid, None)
+  | "Constructor", {pexp_desc = Pexp_constraint ({pexp_desc = Pexp_ident lid}, ct)} ->
+      Typath_constructor (lid, Some ct)
+  | "Field", {pexp_desc = Pexp_ident lid} ->
+      Typath_field (lid, None)
+  | "Field", {pexp_desc = Pexp_constraint ({pexp_desc = Pexp_ident lid}, ct)} ->
+      Typath_field (lid, Some ct)
+  | "Tuple", {pexp_desc = Pexp_tuple [{pexp_desc = Pexp_constant (Pconst_integer (i, None))};
+                                      {pexp_desc = Pexp_constant (Pconst_integer (j, None))}]} ->
+      Typath_tuple (int_of_string i, int_of_string j)
+  | "List", e ->
+      Typath_list e
+  | "Array", e ->
+      Typath_array e
+  | _ -> assert false
+
+let decode_typath payload =
+  let get = function
+    | {pstr_desc=Pstr_eval (e, _)} -> decode_typath_step e
+    | _ -> assert false
+  in
+  match payload with
+  | PStr l -> List.map get l
+  | _ -> assert false
+
+(* END LEXIFI *)
+
 module Cstr = struct
   let mk self fields =
     {

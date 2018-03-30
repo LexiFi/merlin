@@ -129,6 +129,8 @@ and type_desc =
   | Tpackage of Path.t * Longident.t list * type_expr list
   (** Type of a first-class module (a.k.a package). *)
 
+  | Tprop of string core_type_properties * type_expr
+
 (** [  `X | `Y ]       (row_closed = true)
     [< `X | `Y ]       (row_closed = true)
     [> `X | `Y ]       (row_closed = false)
@@ -497,3 +499,6 @@ type label_description =
 (* Backported from 4.08 *)
 
 val signature_item_id : signature_item -> Ident.t
+
+val val_approx: value_description -> string option
+val approx_attr: string -> Parsetree.attribute

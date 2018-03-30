@@ -4,7 +4,7 @@
 (*                                                                        *)
 (*             Xavier Leroy, projet Cristal, INRIA Rocquencourt           *)
 (*                                                                        *)
-(*   Copyright 1998 Institut National de Recherche en Informatique et     *)
+(*   Copyright 1999 Institut National de Recherche en Informatique et     *)
 (*     en Automatique.                                                    *)
 (*                                                                        *)
 (*   All rights reserved.  This file is distributed under the terms of    *)
@@ -13,11 +13,29 @@
 (*                                                                        *)
 (**************************************************************************)
 
-(* Auxiliaries for type-based optimizations, e.g. array kinds *)
+(** Module dependencies. *)
 
-val classify_lazy_argument : Typedtree.expression ->
-                             [ `Constant_or_function
-                             | `Float_that_cannot_be_shortcut
-                             | `Identifier of [`Forward_value | `Other]
-                             | `Forced of Typedtree.expression
-                             | `Other]
+module StringSet : Set.S with type elt = string
+module StringMap : Map.S with type key = string
+
+type map_tree = Node of StringSet.t * bound_map
+and  bound_map = map_tree StringMap.t
+val make_leaf : string -> map_tree
+val make_node : bound_map -> map_tree
+val weaken_map : StringSet.t -> map_tree -> map_tree
+
+val free_structure_names : StringSet.t ref
+
+(* dependencies found by preprocessing tools (plugins) *)
+val pp_deps : string list ref
+
+val open_module : bound_map -> Longident.t -> bound_map
+
+val add_use_file : bound_map -> Parsetree.toplevel_phrase list -> unit
+
+val add_signature : bound_map -> Parsetree.signature -> unit
+
+val add_implementation : bound_map -> Parsetree.structure -> unit
+
+val add_implementation_binding : bound_map -> Parsetree.structure -> bound_map
+val add_signature_binding : bound_map -> Parsetree.signature -> bound_map

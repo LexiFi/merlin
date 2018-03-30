@@ -263,6 +263,8 @@ and enrich_item env p = function
                  rs)
   | item -> item
 
+let enrich_signature env p = List.map (enrich_item env p)
+
 let rec type_paths env p mty =
   match scrape env mty with
     Mty_ident _ -> []
