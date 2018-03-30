@@ -57,6 +57,7 @@ val find_shadowed_types: Path.t -> t -> Path.t list
 
 (* Lookup by paths *)
 
+val find_value_in: Path.t -> string -> t -> value_description * int (* LEXIFI *)
 val find_value: Path.t -> t -> value_description
 val find_type: Path.t -> t -> type_declaration
 val find_type_descrs: Path.t -> t -> type_descriptions
@@ -148,6 +149,9 @@ val add_local_type: Path.t -> type_declaration -> t -> t
 
 val add_item: signature_item -> t -> t
 val add_signature: signature -> t -> t
+
+val add_signature_include: string -> signature -> t -> t (* LEXIFI *)
+val set_allowed_pers_signature: string list -> unit (* LEXIFI *)
 
 (* Insertion of all fields of a signature, relative to the given path.
    Used to implement open. Returns None if the path refers to a functor,
@@ -273,6 +277,9 @@ val set_type_used_callback:
 (* Forward declaration to break mutual recursion with Includemod. *)
 val check_modtype_inclusion:
       (loc:Location.t -> t -> module_type -> Path.t -> module_type -> unit) ref
+
+val store_value: Ident.t -> value_description -> t -> t (* LEXIFI *)
+
 (* Forward declaration to break mutual recursion with Typecore. *)
 val add_delayed_check_forward: ((unit -> unit) -> unit) ref
 (* Forward declaration to break mutual recursion with Mtype. *)
@@ -282,6 +289,9 @@ val strengthen:
 val same_constr: (t -> type_expr -> type_expr -> bool) ref
 (* Forward delcaration to break mutual recursion with Printtyp. *)
 val shorten_module_path : (t -> Path.t -> Path.t) ref
+
+
+val explicit_dependency: Location.t -> string -> unit (* LEXIFI *)
 
 (** Folding over all identifiers (for analysis purpose) *)
 
@@ -312,6 +322,8 @@ val fold_classs:
 val fold_cltypes:
   (string -> Path.t -> class_type_declaration -> 'a -> 'a) ->
   Longident.t option -> t -> 'a -> 'a
+
+val current_unit: string ref (* LEXIFI *)
 
 (** Utilities *)
 val scrape_alias: t -> module_type -> module_type

@@ -20,6 +20,8 @@ type ocaml = {
   ppx                  : string with_workdir list;
   pp                   : string with_workdir option;
   warnings             : Warnings.state;
+  pure_caml            : bool;
+  strict_deps          : bool;
 }
 
 val dump_ocaml : ocaml -> json

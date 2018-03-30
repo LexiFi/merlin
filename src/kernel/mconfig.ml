@@ -22,6 +22,8 @@ type ocaml = {
   ppx                  : string with_workdir list;
   pp                   : string with_workdir option;
   warnings             : Warnings.state;
+  pure_caml            : bool;
+  strict_deps          : bool;
 }
 
 let dump_warnings st =
@@ -47,6 +49,8 @@ let dump_ocaml x = `Assoc [
     "ppx"                  , Json.list (dump_with_workdir Json.string) x.ppx;
     "pp"                   , Json.option (dump_with_workdir Json.string) x.pp;
     "warnings"             , dump_warnings x.warnings;
+    "pure_caml"            , `Bool x.pure_caml;
+    "strict_deps"          , `Bool x.strict_deps;
   ]
 
 (** Some paths can be resolved relative to a current working directory *)
@@ -598,6 +602,14 @@ let ocaml_flags = [
       \     Default setting is %S"
       Warnings.defaults_warn_error
   );
+  ( "-pure_caml",
+    Marg.unit (fun ocaml -> {ocaml with pure_caml = true}),
+    " (undocumented)"
+  );
+  ( "-strict-deps",
+    Marg.unit (fun ocaml -> {ocaml with strict_deps = true}),
+    " (undocumented)"
+  );
 ]
 
 (** {1 Main configuration} *)
@@ -621,6 +633,8 @@ let initial = {
     ppx                  = [];
     pp                   = None;
     warnings             = Warnings.backup ();
+    pure_caml            = false;
+    strict_deps          = false;
   };
   findlib = {
     conf = None;
@@ -633,7 +647,7 @@ let initial = {
     cmi_path    = [];
     cmt_path    = [];
     extensions  = [];
-    suffixes    = [(".ml", ".mli"); (".re", ".rei")];
+    suffixes    = [(".ml", ".mli"); (".mf", ".mfi"); (".re", ".rei")];
     stdlib      = None;
     reader      = [];
     protocol    = `Json;

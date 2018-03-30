@@ -48,12 +48,16 @@ let ident ppf id = pp_print_string ppf (ident_name id)
 
 (* Print a path *)
 
-let ident_pervasive = Ident.create_persistent "Pervasives"
+let ident_pervasives = Ident.create_persistent "Pervasives"
+let opened_idents =
+  lazy (ident_pervasives :: List.map Ident.create_persistent !Clflags.open_modules)
+let is_opened id =
+  List.exists (Ident.same id) (Lazy.force opened_idents)
 
 let rec tree_of_path = function
   | Pident id ->
       Oide_ident (ident_name id)
-  | Pdot(Pident id, s, _pos) when Ident.same id ident_pervasive ->
+  | Pdot(Pident id, s, _pos) when is_opened id ->
       Oide_ident s
   | Pdot(p, s, _pos) ->
       Oide_dot (tree_of_path p, s)
@@ -63,7 +67,7 @@ let rec tree_of_path = function
 let rec path ppf = function
   | Pident id ->
       ident ppf id
-  | Pdot(Pident id, s, _pos) when Ident.same id ident_pervasive ->
+  | Pdot(Pident id, s, _pos) when is_opened id ->
       pp_print_string ppf s
   | Pdot(p, s, _pos) ->
       path ppf p;
@@ -198,6 +202,9 @@ and raw_type_desc ppf = function
   | Tpackage (p, _, tl) ->
       fprintf ppf "@[<hov1>Tpackage(@,%a@,%a)@]" path p
         raw_type_list tl
+  | Tprop (_, ty) ->
+      fprintf ppf "@[<hov1>Tprop(@,_@,%a)@]"
+        raw_type ty
 
 and raw_field ppf = function
     Rpresent None -> fprintf ppf "Rpresent None"
@@ -440,6 +447,7 @@ let rec mark_loops_rec visited ty =
         List.iter (fun t -> add_alias t) tyl;
         mark_loops_rec visited ty
     | Tunivar _ -> add_named_var ty
+    | Tprop (_, ty) -> mark_loops_rec visited ty
 
 let mark_loops ty =
   normalize_type Env.empty ty;
@@ -570,6 +578,8 @@ let rec tree_of_typexp sch ty =
         let n =
           List.map (fun li -> String.concat "." (Longident.flatten li)) n in
         Otyp_module (Path.name p, n, tree_of_typlist sch tyl)
+    | Tprop (_props, ty) ->
+        tree_of_typexp sch ty
   in
   if List.memq px !delayed then delayed := List.filter ((!=) px) !delayed;
   if is_aliased px && aliasable ty then begin
@@ -895,6 +905,13 @@ let tree_of_value_description id decl =
     | Val_prim p -> Primitive.print p vd
     | _ -> vd
   in
+  (* BEGIN LEXIFI *)
+  let vd =
+    match Types.val_approx decl with
+    | Some s -> {vd with oval_prims = [ Printf.sprintf "=%s" s ]}
+    | None -> vd
+  in
+  (* END LEXIFI *)
   Osig_value vd
 
 let value_description id ppf decl =
@@ -1536,4 +1553,3 @@ let () =
   Env.shorten_module_path := shorten_module_path
 
 let compute_map_for_pers _name = true
-

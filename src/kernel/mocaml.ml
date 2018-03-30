@@ -20,6 +20,7 @@ let setup_config config = (
   nopervasives         := ocaml.nopervasives ;
   strict_formats       := ocaml.strict_formats ;
   open_modules         := ocaml.open_modules ;
+  strict_deps          := ocaml.strict_deps ;
 )
 
 (* Instance of environment cache & btype unification log  *)

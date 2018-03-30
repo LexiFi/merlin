@@ -4,6 +4,7 @@ let named_item_at = function
 
 let nullable (type a) : a MenhirInterpreter.nonterminal -> bool =
   let open MenhirInterpreter in function
+  | N_with_propss -> true
   | N_virtual_flag -> true
   | N_type_variance -> true
   | N_type_kind -> true
@@ -20,6 +21,8 @@ let nullable (type a) : a MenhirInterpreter.nonterminal -> bool =
   | N_optional_type_parameters -> true
   | N_opt_type_constraint -> true
   | N_opt_semi -> true
+  | N_opt_props -> true
+  | N_opt_plus_props -> true
   | N_opt_pattern_type_constraint -> true
   | N_opt_default -> true
   | N_opt_bar -> true

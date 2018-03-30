@@ -27,6 +27,8 @@ type error =
   | Unterminated_string
   | Unterminated_string_in_comment of Location.t * Location.t
   | Keyword_as_label of string
+  | Illegal_date_format
+  | Illegal_date_value
   | Invalid_literal of string
 
 exception Error of error * Location.t
@@ -56,6 +58,7 @@ type state = {
   mutable string_start_loc: Location.t;
   mutable comment_start_loc: Location.t list;
   mutable preprocessor: preprocessor option;
+  mutable pending_tokens: token list;
 }
 
 let make ?preprocessor keywords = {
@@ -64,6 +67,7 @@ let make ?preprocessor keywords = {
   string_start_loc = Location.none;
   comment_start_loc = [];
   preprocessor;
+  pending_tokens = [];
 }
 
 let lABEL m = m >>= fun v -> return (LABEL v)
@@ -215,6 +219,60 @@ let keyword_or state s default =
       with Not_found -> try Hashtbl.find keyword_table s
   with Not_found -> default
 
+(* Parse a date *)
+
+let check_date ~year ~month ~day =
+  1 <= day &&
+  1 <= month && month <= 12 &&
+  1980 <= year && year <= 2299 &&
+  begin day <= 28 || match month with
+    | 2 -> day = 29 && year land 3 = 0 && year <> 2100 && year <> 2200
+    | 4 | 6 | 9 | 11 -> day <= 30
+    | _ -> day <= 31
+  end
+
+let hours_in_day = 24
+let minutes_in_day = hours_in_day * 60
+
+let date_of_gregorian (y, m, d, hr, mn) =
+  let t =
+    (
+     (match m with
+     | 1 | 2 ->
+         ( 1461 * ( y + 4800 - 1 ) ) / 4 +
+           ( 367 * ( m + 10 ) ) / 12 -
+           ( 3 * ( ( y + 4900 - 1 ) / 100 ) ) / 4
+     | _ ->
+         ( 1461 * ( y + 4800 ) ) / 4 +
+           ( 367 * ( m - 2 ) ) / 12 -
+           ( 3 * ( ( y + 4900 ) / 100 ) ) / 4)
+       + d - 32075 - 2444238) * minutes_in_day
+      + hr * 60 + mn in
+  (* force result to be in [min_date; max_date]. *)
+  if t < 3600 then 3600 else if 168307199 < t then 168307199 else t
+
+let date_of_string lexbuf =
+  let sub ofs len =
+    let rec sub acc i len =
+      if len = 0
+      then acc
+      else sub (acc * 10 + int_of_char(Bytes.unsafe_get lexbuf.lex_buffer i) - 48) (i + 1) (len - 1)
+    in
+    let i = lexbuf.lex_start_pos + ofs in
+    sub (int_of_char(Bytes.unsafe_get lexbuf.lex_buffer i) - 48) (i + 1) (len - 1)
+  in
+  let year = sub 0 4 in
+  let month = sub 5 2 in
+  let day = sub 8 2 in
+  if check_date ~year ~month ~day
+  then
+    date_of_gregorian
+      (if Lexing.lexeme_end lexbuf - Lexing.lexeme_start lexbuf < 16
+       then (year, month, day, (*hour*) 12, (*minute*) 0)
+       else (year, month, day, (*hour*) sub 11 2, (*minute*) sub 14 2))
+  else raise (Error(Illegal_date_value, Location.curr lexbuf))
+
+
 (* recover the name from a LABEL or OPTLABEL token *)
 
 let get_label_name lexbuf =
@@ -268,6 +326,10 @@ let report_error ppf = function
               Location.print_error loc
   | Keyword_as_label kwd ->
       fprintf ppf "`%s' is a keyword, it cannot be used as label name" kwd
+  | Illegal_date_format ->
+      pp_print_string ppf "Illegal date format. Must be [YYYY-MM-DD][THH:MM[:SS]?]? !"
+  | Illegal_date_value ->
+      pp_print_string ppf "Illegal date value"
   | Invalid_literal s ->
       fprintf ppf "Invalid literal %s" s
 
@@ -298,6 +360,9 @@ let symbolcharnopercent =
   ['!' '$' '&' '*' '+' '-' '.' '/' ':' '<' '=' '>' '?' '@' '^' '|' '~']
 let dotsymbolchar =
   ['!' '$' '%' '&' '*' '+' '-' '/' ':' '=' '>' '?' '@' '^' '|' '~']
+(* BEGIN LEXIFI *)
+let infixchar = identchar | symbolchar
+(* END LEXIFI *)
 let decimal_literal =
   ['0'-'9'] ['0'-'9' '_']*
 let hex_digit =
@@ -314,6 +379,31 @@ let float_literal =
   ['0'-'9'] ['0'-'9' '_']*
   ('.' ['0'-'9' '_']* )?
   (['e' 'E'] ['+' '-']? ['0'-'9'] ['0'-'9' '_']*) ?
+let date_literal =
+  (* the lexer makes as many tests as possible:
+     1980 <= year <= 2299
+     1 <= month <= 12
+     1 <= day <= 39 (to be further checked)
+     0 <= hours <= 23
+     0 <= minutes <= 59
+     0 <= seconds <= 59
+  *)
+  (('1' '9' ['8'-'9']['0'-'9'])|('2' ['0'-'2']['0'-'9']['0'-'9'])) (* year *)
+  '-' (('0' ['1'-'9'])|('1' ['0'-'2'])) (* month *)
+  '-' (('0' ['1'-'9'])|(['1'-'3']['0'-'9'])) (* day *)
+  (
+   'T' ((['0'-'1']['0'-'9'])|('2' ['0'-'3'])) (* hour *)
+   ':' (['0'-'5']['0'-'9']) (* minutes *)
+   (
+    ':' ['0'-'5']['0'-'9'] (* seconds *)
+   )? (* optional seconds *)
+   (
+    "GMT" ['+' '-']['0'-'9']['0'-'9']? (* hr displacement *)
+   )? (* optional GMT displacement *)
+  )? (* optional time *)
+let bad_date_literal =
+  ['0'-'9']+ '-' ['0'-'9']+ '-' ['0'-'9']+
+    ('T' ['0'-'9']+ ':' ['0'-'9']+ (':' ['0'-'9']+)?)?
 let hex_float_literal =
   '0' ['x' 'X']
   ['0'-'9' 'A'-'F' 'a'-'f'] ['0'-'9' 'A'-'F' 'a'-'f' '_']*
@@ -370,6 +460,32 @@ rule token state = parse
               try Hashtbl.find keyword_table s
               with Not_found ->
                 LIDENT s) }
+
+(* BEGIN LEXIFI *)
+(*
+   Recognize  id~ but avoid clashing with id~id and id~id:
+
+   The current approach produce wrong locations...
+
+   Another approach would be to extend Lexing to let action backtrack
+   the lexbuf (reinject the last character(s) back)
+*)
+  | (lowercase identchar * as id1) '~' (lowercase identchar * as id2)
+      {
+        state.pending_tokens <- [TILDE; LIDENT id2];
+        return (LIDENT id1)
+      }
+  | (lowercase identchar * as id1) '~' (lowercase identchar * as id2) ':'
+      {
+        state.pending_tokens <- [LABEL id2];
+        return (LIDENT id1)
+      }
+  | lowercase identchar * '~'
+      {
+        return (LIDENT (Lexing.lexeme lexbuf))
+      }
+(* END LEXIFI *)
+
   | lowercase_latin1 identchar_latin1 *
       { warn_latin1 lexbuf; return (LIDENT (Lexing.lexeme lexbuf)) }
   | uppercase identchar *
@@ -380,6 +496,10 @@ rule token state = parse
               try Hashtbl.find keyword_table s
               with Not_found ->
                 UIDENT s) }
+  | int_literal '~'
+      { let s = Lexing.lexeme lexbuf in
+        let s = String.sub s ~pos:0 ~len:(String.length s - 1) in
+        return (INT_OBS (int_of_string(s))) }
   | uppercase_latin1 identchar_latin1 *
     { warn_latin1 lexbuf; return (UIDENT (Lexing.lexeme lexbuf)) }
   | int_literal { return (INT (Lexing.lexeme lexbuf, None)) }
@@ -391,6 +511,16 @@ rule token state = parse
     { return (FLOAT (lit, Some modif)) }
   | (float_literal | hex_float_literal | int_literal) identchar+
      { fail (Invalid_literal (Lexing.lexeme lexbuf)) (Location.curr lexbuf) }
+  | float_literal '~'
+      { let s = Lexing.lexeme lexbuf in
+        let s = String.sub s ~pos:0 ~len:(String.length s - 1) in
+        return (FLOAT_OBS s) }
+  | date_literal '~'
+      { return (DATE_OBS(date_of_string(lexbuf))) }
+  | date_literal
+      { return (DATE(date_of_string(lexbuf))) }
+  | bad_date_literal
+      { fail Illegal_date_format (Location.curr lexbuf) }
   | "\""
       { Buffer.reset state.buffer;
         state.string_start_loc <- Location.curr lexbuf;

@@ -22,6 +22,9 @@ let unsafe_string =
 let nopervasives        = ref false
 let strict_formats      = ref false
 let open_modules        = ref []
+let strict_props        = ref true
+let strict_deps         = ref false
+let pure_caml           = ref false
 
 let annotations         = ref false
 let binary_annotations  = ref true

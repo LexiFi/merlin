@@ -28,7 +28,7 @@ let () =
        The long term plan is to get rid of findlib inside Merlin. *)
     begin match Sys.getenv "OCAMLFIND_CONF" with
       | exception Not_found ->
-        Unix.putenv "OCAMLFIND_CONF" "/dev/null"
+        Unix.putenv "OCAMLFIND_CONF" (if Sys.win32 then "NUL" else "/dev/null")
       | _ -> ()
     end
 

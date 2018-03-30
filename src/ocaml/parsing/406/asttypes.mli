@@ -33,6 +33,8 @@ type private_flag = Private | Public
 
 type mutable_flag = Immutable | Mutable
 
+type lazy_flag = Lazy | NonLazy
+
 type virtual_flag = Virtual | Concrete
 
 type override_flag = Override | Fresh
@@ -40,6 +42,8 @@ type override_flag = Override | Fresh
 type closed_flag = Closed | Open
 
 type label = string
+
+type 'a core_type_properties = (string * 'a) list
 
 type arg_label =
     Nolabel

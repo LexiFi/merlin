@@ -149,6 +149,8 @@ module MakeMap(Map : MapArgument) = struct
         | Tstr_include incl ->
           Tstr_include {incl with incl_mod = map_module_expr incl.incl_mod}
         | Tstr_attribute x -> Tstr_attribute x
+        | Tstr_usettype exp ->
+          Tstr_usettype (map_expression exp)
     in
     Map.leave_structure_item { item with str_desc = str_desc}
 
@@ -385,6 +387,13 @@ module MakeMap(Map : MapArgument) = struct
           Texp_object (map_class_structure cl, string_list)
         | Texp_pack (mexpr) ->
           Texp_pack (map_module_expr mexpr)
+        | Texp_typath l ->
+            let step = function
+              | Ttypath_list e -> Ttypath_list (map_expression e)
+              | Ttypath_array e -> Ttypath_array (map_expression e)
+              | d -> d
+            in
+            Texp_typath (List.map step l)
         | Texp_unreachable ->
           Texp_unreachable
         | Texp_extension_constructor _ as e ->

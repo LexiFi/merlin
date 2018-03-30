@@ -801,6 +801,19 @@ let acknowledge_pers_struct check modname
   register_pers_for_short_paths ps;
   ps
 
+(* BEGIN LEXIFI *)
+let allowed_sigs = Hashtbl.create 8
+let restrict_sigs = ref false
+let set_allowed_pers_signature l =
+  restrict_sigs := true;
+  Hashtbl.clear allowed_sigs;
+  List.iter (fun s -> Hashtbl.add allowed_sigs s ())
+    (l @ !Clflags.open_modules
+     @ ["CamlinternalOO";"CamlinternalMod";"CamlinternalLazy";"Lazy";"Mlfi_types";
+        "CamlinternalFormat";"CamlinternalFormatBasics"
+       ])
+(* END LEXIFI *)
+
 let read_pers_struct check modname filename =
   add_import modname;
   let {Cmi_cache. cmi; cmi_cache} = Cmi_cache.read filename in
@@ -814,6 +827,7 @@ let find_pers_struct check name =
   | { loaded = true; cell = None } -> raise Not_found
   | key ->
     key.loaded <- true;
+    if !restrict_sigs && not (Hashtbl.mem allowed_sigs name) then raise Not_found; (* LEXIFI *)
     let ps =
       match !Persistent_signature.load ~unit_name:name with
       | Some ps -> ps
@@ -821,6 +835,9 @@ let find_pers_struct check name =
     in
     add_import name;
     acknowledge_pers_struct check name ps
+
+let implicitly_used_persistent_ids = sref (fun () -> Hashtbl.create 8)
+let explicitly_used_persistent_ids = sref (fun () -> Hashtbl.create 8)
 
 (* Emits a warning if there is no valid cmi for name *)
 let check_pers_struct name =
@@ -875,6 +892,8 @@ let check_pers_struct name =
 
 let reset_cache () =
   current_unit := "";
+  Hashtbl.clear !explicitly_used_persistent_ids;
+  Hashtbl.clear !implicitly_used_persistent_ids;
   Hashtbl.clear !persistent_structures;
   clear_imports ();
   short_paths_basis := Short_paths.Basis.create ();
@@ -907,9 +926,19 @@ let get_unit_name () =
 
 (* Lookup by identifier *)
 
+let explicit_dependency loc s =
+  if not loc.Location.loc_ghost && Warnings.is_active (Warnings.Unused_explicit_dependency "") then
+    !add_delayed_check_forward
+      (fun () ->
+        if Hashtbl.mem !explicitly_used_persistent_ids s || not (Hashtbl.mem !implicitly_used_persistent_ids s)
+        then Location.prerr_warning loc (Warnings.Unused_explicit_dependency s)
+      )
+
 let rec find_module_descr path env =
   match path with
     Pident id ->
+      if Ident.persistent id then
+        Hashtbl.replace !implicitly_used_persistent_ids (Ident.name id) ();
       begin try
         IdTbl.find_same id env.components
       with Not_found ->
@@ -946,6 +975,13 @@ let find proj1 proj2 path env =
       end
   | Papply _ ->
       raise Not_found
+
+(* BEGIN LEXIFI *)
+let find_value_in p s env =
+  match get_components (find_module_descr p env) with
+  | Structure_comps c -> Tbl.find s c.comp_values
+  | Functor_comps _f -> raise Not_found
+(* END LEXIFI *)
 
 let find_value =
   find (fun env -> env.values) (fun sc -> sc.comp_values)
@@ -1166,6 +1202,7 @@ let rec lookup_module_descr_aux ?loc lid env =
         IdTbl.find_name s env.components
       with Not_found ->
         if s = !current_unit then raise Not_found;
+        Hashtbl.replace !explicitly_used_persistent_ids s (); (* LEXIFI *)
         let ps = find_pers_struct s in
         (Pident(Ident.create_persistent s), ps.ps_comps)
       end
@@ -1222,6 +1259,7 @@ and lookup_module ~load ?loc lid env : Path.t =
       with Not_found ->
         if s = !current_unit then raise Not_found;
         let p = Pident(Ident.create_persistent s) in
+        Hashtbl.replace !explicitly_used_persistent_ids s (); (* LEXIFI *)
         if !Clflags.transparent_modules && not load then check_pers_struct s
         else begin
           let ps = find_pers_struct s in
@@ -2110,6 +2148,31 @@ let rec add_signature sg env =
     [] -> env
   | comp :: rem -> add_signature rem (add_item comp env)
 
+(* BEGIN LEXIFI *)
+let root_attr s =
+  [Location.mknoloc "#root#",
+   Parsetree.PTyp (Ast_helper.Typ.var s)]
+
+let add_item_include root comp env =
+  match comp with
+    Sig_value(id, decl)     -> add_value id decl env
+  | Sig_type(id, decl, _)   ->
+      let decl = {decl with type_attributes = decl.type_attributes @ root_attr root} in
+      add_type ~check:false ~predef:false id decl env
+  | Sig_typext(id, ext, _)  -> add_extension ~check:false id ext env
+  | Sig_module(id, md, _)  ->
+      let md = {md with md_attributes = md.md_attributes @ root_attr root} in
+      add_module_declaration ~check:false id md env
+  | Sig_modtype(id, decl)   -> add_modtype id decl env
+  | Sig_class(id, decl, _)  -> add_class id decl env
+  | Sig_class_type(id, decl, _) -> add_cltype id decl env
+
+let rec add_signature_include root sg env =
+  match sg with
+    [] -> env
+  | comp :: rem -> add_signature_include root rem (add_item_include root comp env)
+(* END LEXIFI *)
+
 (* Open a signature path *)
 
 let add_components slot root env0 comps =
@@ -2263,6 +2326,7 @@ let imports () =
 
 (* Returns true if [s] is an opaque imported module  *)
 let is_imported_opaque s =
+  !restrict_sigs && not (Hashtbl.mem allowed_sigs s) || (* LEXIFI *)
   StringSet.mem s !imported_opaque_units
 
 (* Save a signature to a file *)
@@ -2711,6 +2775,10 @@ let env_of_only_summary env_from_summary env =
     local_constraints = env.local_constraints;
     flags = env.flags;
   }
+
+
+let store_value id decl env =
+  store_value ?check:None id decl env
 
 (* Error report *)
 
