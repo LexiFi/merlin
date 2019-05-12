@@ -23,4 +23,5 @@ val classify_lazy_argument : Typedtree.expression ->
                              [ `Constant_or_function
                              | `Float_that_cannot_be_shortcut
                              | `Identifier of [`Forward_value | `Other]
+                             | `Forced of Typedtree.expression
                              | `Other]

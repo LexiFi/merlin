@@ -4,7 +4,7 @@
 (*                                                                        *)
 (*             Xavier Leroy, projet Cristal, INRIA Rocquencourt           *)
 (*                                                                        *)
-(*   Copyright 1996 Institut National de Recherche en Informatique et     *)
+(*   Copyright 1999 Institut National de Recherche en Informatique et     *)
 (*     en Automatique.                                                    *)
 (*                                                                        *)
 (*   All rights reserved.  This file is distributed under the terms of    *)
@@ -13,55 +13,36 @@
 (*                                                                        *)
 (**************************************************************************)
 
-(** Auxiliary AST types used by parsetree and typedtree.
+(** Module dependencies.
 
   {b Warning:} this module is unstable and part of
   {{!Compiler_libs}compiler-libs}.
 
 *)
 
-type constant =
-    Const_int of int
-  | Const_char of char
-  | Const_string of string * string option
-  | Const_float of string
-  | Const_int32 of int32
-  | Const_int64 of int64
-  | Const_nativeint of nativeint
+module String : sig
+  module Set : Set.S with type elt = string
+  module Map : Map.S with type key = string
+end
 
-type rec_flag = Nonrecursive | Recursive
+type map_tree = Node of String.Set.t * bound_map
+and  bound_map = map_tree String.Map.t
+val make_leaf : string -> map_tree
+val make_node : bound_map -> map_tree
+val weaken_map : String.Set.t -> map_tree -> map_tree
 
-type direction_flag = Upto | Downto
+val free_structure_names : String.Set.t ref
 
-(* Order matters, used in polymorphic comparison *)
-type private_flag = Private | Public
+(** dependencies found by preprocessing tools (plugins) *)
+val pp_deps : string list ref
 
-type mutable_flag = Immutable | Mutable
+val open_module : bound_map -> Longident.t -> bound_map
 
-type lazy_flag = Lazy | NonLazy
+val add_use_file : bound_map -> Parsetree.toplevel_phrase list -> unit
 
-type virtual_flag = Virtual | Concrete
+val add_signature : bound_map -> Parsetree.signature -> unit
 
-type override_flag = Override | Fresh
+val add_implementation : bound_map -> Parsetree.structure -> unit
 
-type closed_flag = Closed | Open
-
-type label = string
-
-type 'a core_type_properties = (string * 'a) list
-
-type arg_label =
-    Nolabel
-  | Labelled of string (*  label:T -> ... *)
-  | Optional of string (* ?label:T -> ... *)
-
-type 'a loc = 'a Location.loc = {
-  txt : 'a;
-  loc : Location.t;
-}
-
-
-type variance =
-  | Covariant
-  | Contravariant
-  | Invariant
+val add_implementation_binding : bound_map -> Parsetree.structure -> bound_map
+val add_signature_binding : bound_map -> Parsetree.signature -> bound_map

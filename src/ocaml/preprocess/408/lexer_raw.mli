@@ -21,6 +21,8 @@ type error =
   | Unterminated_string
   | Unterminated_string_in_comment of Location.t * Location.t
   | Keyword_as_label of string
+  | Illegal_date_format
+  | Illegal_date_value
   | Invalid_literal of string
 exception Error of error * Location.t
 
@@ -42,6 +44,7 @@ type state = {
   mutable string_start_loc: Location.t;
   mutable comment_start_loc: Location.t list;
   mutable preprocessor: preprocessor option;
+  mutable pending_tokens: Parser_raw.token list;
 }
 
 val make: ?preprocessor:preprocessor -> keywords -> state

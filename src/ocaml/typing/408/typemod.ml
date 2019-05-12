@@ -1947,7 +1947,17 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
         match ty_arg with
         | None -> (Ident.create_scoped ~scope "*", env), false
         | Some mty ->
-            Env.enter_module ~scope ~arg:true name.txt Mp_present mty env,
+            (* BEGIN LEXIFI *)
+            let md =
+              {
+                md_type = mty;
+                md_attributes = [Ast_helper.Attr.mk (mknoloc "#funarg#") (PStr[])];
+                md_loc=Location.none
+              }
+            in
+            (* END LEXIFI *)
+            let id = Ident.create_scoped ~scope name.txt in
+            (id, Env.enter_module_declaration ~arg:true id Mp_present md env),
             true
       in
       let body = type_module sttn funct_body None newenv sbody in
@@ -2403,6 +2413,14 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
             (extract_sig_open env smodl.pmod_loc modl.mod_type) env in
         let newenv = Env.update_short_paths newenv in
         List.iter (Signature_names.check_sig_item names loc) sg;
+        (* BEGIN LEXIFI *)
+        let root =
+          match modl.mod_desc with
+          | Tmod_ident (p, _) -> Typecore.full_name_mod env p
+          | _ -> "*INCLUDED*"
+        in
+        let newenv = Env.add_signature_include root sg newenv in (* LEXIFI *)
+        (* END LEXIFI *)
         let incl =
           { incl_mod = modl;
             incl_type = sg;
@@ -2411,6 +2429,11 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
           }
         in
         Tstr_include incl, sg, newenv
+(* BEGIN LEXIFI *)
+    | Pstr_extension (({txt="mlfi.lettype"}, PStr[{pstr_desc=Pstr_eval(sexpr,[])}]), _) ->
+        let expr = Typecore.type_expression env sexpr in
+        Tstr_usettype expr, [], env
+(* END LEXIFI *)
     | Pstr_extension (ext, _attrs) ->
         raise (Error_forward (Builtin_attributes.error_of_extension ext))
     | Pstr_attribute x ->
@@ -2420,6 +2443,10 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
   let rec type_struct env sstr =
     match sstr with
     | [] -> ([], [], env)
+    | {pstr_desc=Pstr_include{pincl_mod={pmod_desc=Pmod_apply({pmod_desc=Pmod_ident {txt=Lident "IGNORE"}},{pmod_desc=Pmod_ident {txt=Lident m}})}};
+       pstr_loc} :: srem ->
+        Env.explicit_dependency pstr_loc m;
+        type_struct env srem
     | pstr :: srem ->
         let previous_saved_types = Cmt_format.get_saved_types () in
         match type_str_item env srem pstr with
@@ -2576,10 +2603,57 @@ let () =
   Typeclass.type_open_descr := type_open_descr;
   type_module_type_of_fwd := type_module_type_of
 
+(* BEGIN LEXIFI *)
+(* Compute a global name for module bindings and type declarations *)
+let root_attr s =
+  [Ast_helper.Attr.mk (Location.mknoloc "#root#")
+     (Parsetree.PTyp (Ast_helper.Typ.var s))]
+
+let assign_global_names unit =
+  let open Ast_mapper in
+  let rec mapper path =
+    let super = default_mapper in
+    let module_binding _m pmb =
+      let m = mapper (path ^ "." ^ pmb.pmb_name.txt) in
+      let pmb = super.module_binding m pmb in
+      {pmb with pmb_attributes = pmb.pmb_attributes @ root_attr path}
+    in
+    let type_declaration _m td =
+      {td with ptype_attributes = td.ptype_attributes @ root_attr path}
+    in
+    let expr m e =
+      match e.pexp_desc with
+      | Pexp_letmodule ({txt}, _me, _expr) ->
+          let m = mapper ("*LOCAL*." ^ txt) in
+          super.expr m e
+      | _ ->
+          super.expr m e
+    in
+    {super with module_binding; type_declaration; expr}
+  in
+  mapper unit
+(* END LEXIFI *)
+
 
 (* Typecheck an implementation file *)
 
+let handle_implicit_deps r x =
+  let module String = Depend.String in
+  if !Clflags.strict_deps then begin
+    Depend.free_structure_names := String.Set.empty;
+    r String.Map.empty x;
+    Env.set_allowed_pers_signature
+      (String.Set.elements !Depend.free_structure_names)
+  end
+
 let type_implementation sourcefile outputprefix modulename initial_env ast =
+  handle_implicit_deps Depend.add_implementation ast;
+  (* BEGIN LEXIFI *)
+  let ast =
+    let map = assign_global_names !Env.current_unit in
+    map.Ast_mapper.structure map ast
+  in
+  (* END LEXIFI *)
   Cmt_format.clear ();
   Misc.try_finally (fun () ->
       Typecore.reset_delayed_checks ();
@@ -2597,8 +2671,13 @@ let type_implementation sourcefile outputprefix modulename initial_env ast =
           );
         (str, Tcoerce_none)   (* result is ignored by Compile.implementation *)
       end else begin
+        let suffix =
+          if Filename.check_suffix sourcefile ".mf" && !Config.interface_suffix = ".mli"
+          then ".mfi"
+          else !Config.interface_suffix
+        in
         let sourceintf =
-          Filename.remove_extension sourcefile ^ !Config.interface_suffix in
+          Filename.remove_extension sourcefile ^ suffix in
         if Sys.file_exists sourceintf then begin
           let intf_file =
             try
@@ -2659,6 +2738,7 @@ let save_signature modname tsg outputprefix source_file initial_env cmi =
     (Cmt_format.Interface tsg) (Some source_file) initial_env (Some cmi)
 
 let type_interface sourcefile env ast =
+  handle_implicit_deps Depend.add_signature ast;
   InterfaceHooks.apply_hooks { Misc.sourcefile } (transl_signature env ast)
 
 (* "Packaging" of several compilation units into one unit
