@@ -133,9 +133,10 @@ let get_unboxed_type_representation =
   Typedecl_unboxed.get_unboxed_type_representation
 
 (* Determine if a type's values are represented by floats at run-time. *)
-let is_float env ty =
+let rec is_float env ty =
   match get_unboxed_type_representation env ty with
     Some {desc = Tconstr(p, _, _); _} -> Path.same p Predef.path_float
+  | Some {desc = Tprop (_, ty)} -> is_float env ty
   | _ -> false
 
 (* Determine if a type definition defines a fixed type. (PW) *)
@@ -190,8 +191,17 @@ let make_params env params =
   in
     List.map make_param params
 
+let props_attributes env attrs =
+  Ast_helper.map_props
+    (fun e ->
+       let s = really_approx_expr env e in
+       {e with pexp_desc = Pexp_constant(Pconst_string (s, None))}
+    )
+    attrs
+
 let transl_labels env closed lbls =
   assert (lbls <> []);
+
   let all_labels = ref String.Set.empty in
   List.iter
     (fun {pld_name = {txt=name; loc}} ->
@@ -204,7 +214,8 @@ let transl_labels env closed lbls =
     Builtin_attributes.warning_scope attrs
       (fun () ->
          let arg = Ast_helper.Typ.force_poly arg in
-         let cty = transl_simple_type env closed arg in
+         let cty = transl_simple_type_with_props env closed arg in
+         let attrs = props_attributes env attrs in
          {ld_id = Ident.create_local name.txt;
           ld_name = name; ld_mutable = mut;
           ld_type = cty; ld_loc = loc; ld_attributes = attrs}
@@ -228,7 +239,7 @@ let transl_labels env closed lbls =
 
 let transl_constructor_arguments env closed = function
   | Pcstr_tuple l ->
-      let l = List.map (transl_simple_type env closed) l in
+      let l = List.map (transl_simple_type_with_props env closed) l in
       Types.Cstr_tuple (List.map (fun t -> t.ctyp_type) l),
       Cstr_tuple l
   | Pcstr_record l ->
@@ -251,7 +262,7 @@ let make_constructor env type_path type_params sargs sret_type =
       let args, targs =
         transl_constructor_arguments env false sargs
       in
-      let tret_type = transl_simple_type env false sret_type in
+      let tret_type = transl_simple_type_with_props env false sret_type in
       let ret_type = tret_type.ctyp_type in
       let params =
         match (Ctype.repr ret_type).desc with
@@ -302,6 +313,7 @@ let rec check_unboxed_abstract_arg loc univ ty =
     | None -> ()
     | Some (_, args) -> List.iter (check_unboxed_abstract_arg loc univ) args
     end
+  | Tprop (_, t)
   | Tpoly (t, _) -> check_unboxed_abstract_arg loc univ t
 
 and check_unboxed_abstract_row_field loc univ (_, field) =
@@ -333,6 +345,7 @@ let rec check_unboxed_gadt_arg loc univ env ty =
       List.iter (check_unboxed_abstract_arg loc univ) args
   | Some {desc = Tfield _ | Tlink _ | Tsubst _; _} -> assert false
   | Some {desc = Tunivar _; _} -> ()
+  | Some {desc = Tprop (_, t2); _}
   | Some {desc = Tpoly (t2, _); _} -> check_unboxed_gadt_arg loc univ env t2
   | None -> ()
       (* This case is tricky: the argument is another (or the same) type
@@ -423,6 +436,7 @@ let transl_declaration env sdecl id =
             make_constructor env (Path.Pident id) params
                              scstr.pcd_args scstr.pcd_res
           in
+          let attrs = props_attributes env scstr.pcd_attributes in
           if Config.flat_float_array && unbox then begin
             (* Cannot unbox a type when the argument can be both float and
                non-float because it interferes with the dynamic float array
@@ -447,14 +461,14 @@ let transl_declaration env sdecl id =
               cd_args = targs;
               cd_res = tret_type;
               cd_loc = scstr.pcd_loc;
-              cd_attributes = scstr.pcd_attributes }
+              cd_attributes = attrs }
           in
           let cstr =
             { Types.cd_id = name;
               cd_args = args;
               cd_res = ret_type;
               cd_loc = scstr.pcd_loc;
-              cd_attributes = scstr.pcd_attributes }
+              cd_attributes = attrs }
           in
             tcstr, cstr
         in
@@ -479,7 +493,7 @@ let transl_declaration env sdecl id =
         None -> None, None
       | Some sty ->
         let no_row = not (is_fixed_type sdecl) in
-        let cty = transl_simple_type env no_row sty in
+        let cty = transl_simple_type_with_props env no_row sty in
         Some cty, Some cty.ctyp_type
     in
     let decl =
@@ -492,7 +506,7 @@ let transl_declaration env sdecl id =
         type_is_newtype = false;
         type_expansion_scope = Btype.lowest_level;
         type_loc = sdecl.ptype_loc;
-        type_attributes = sdecl.ptype_attributes;
+        type_attributes = props_attributes env sdecl.ptype_attributes;
         type_immediate = false;
         type_unboxed = unboxed_status;
       } in
@@ -1382,8 +1396,23 @@ let transl_value_decl env loc valdecl =
   let v =
   match valdecl.pval_prim with
     [] when Env.is_in_signature env ->
-      { val_type = ty; val_kind = Val_reg; Types.val_loc = loc;
-        val_attributes = valdecl.pval_attributes }
+      let approx =
+        try Some (List.find (function {attr_name = {txt = "mlfi.val_expr"; _}; _} -> true | _ -> false) valdecl.pval_attributes)
+        with Not_found ->
+        try Some (List.find (function {attr_name = {txt = "val"|"lexifi.val"; _}; _} -> true | _ -> false) valdecl.pval_type.ptyp_attributes)
+        with Not_found -> None
+      in
+      let approx =
+        match approx with
+        | None -> []
+        | Some {attr_payload = PStr[{pstr_desc=Pstr_eval (e, _)}]; _} ->
+            [Types.approx_attr (really_approx_expr env e)]
+        | Some _ ->
+            assert false
+      in
+      { val_type = ty; val_kind = Val_reg;
+        Types.val_loc = loc;
+        val_attributes = approx @ valdecl.pval_attributes }
   | [] ->
       raise (Error(valdecl.pval_loc, Val_in_structure))
   | _ ->

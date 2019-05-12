@@ -155,6 +155,8 @@ module MakeIterator(Iter : IteratorArgument) : sig
               (fun (_, _, ct) -> iter_class_type_declaration ct)
               list
         | Tstr_include incl -> iter_module_expr incl.incl_mod
+        | Tstr_usettype _ ->
+            assert false
         | Tstr_attribute _ ->
             ()
       end;
@@ -361,6 +363,13 @@ module MakeIterator(Iter : IteratorArgument) : sig
             iter_class_structure cl
         | Texp_pack (mexpr) ->
             iter_module_expr mexpr
+        | Texp_typath pl ->
+            let aux = function
+              | Ttypath_list e
+              | Ttypath_array e -> iter_expression e
+              | _ -> ()
+            in
+            List.iter aux pl
         | Texp_letop{let_; ands; param = _; body; partial = _} ->
             iter_binding_op let_;
             List.iter iter_binding_op ands;

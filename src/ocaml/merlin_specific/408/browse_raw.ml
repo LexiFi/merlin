@@ -355,6 +355,13 @@ let of_expression_desc loc = function
     of_bop let_ **
     list_fold of_bop ands **
     of_case body
+  | Texp_typath steps ->
+    list_fold (function
+        | Ttypath_constructor _ | Ttypath_field _ | Ttypath_tuple _ ->
+          id_fold
+        | Ttypath_list e | Ttypath_array e ->
+          of_expression e
+      ) steps
   | Texp_open (od, e) ->
     app (Module_expr od.open_expr) ** of_expression e
 
@@ -449,6 +456,8 @@ and of_structure_item_desc = function
   | Tstr_open d ->
     app (Open_declaration d)
   | Tstr_attribute _ ->
+    id_fold
+  | Tstr_usettype _ ->
     id_fold
 
 and of_module_type_desc = function

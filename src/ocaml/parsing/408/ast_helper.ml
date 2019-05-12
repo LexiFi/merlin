@@ -609,6 +609,89 @@ module Csig = struct
     }
 end
 
+(* BEGIN LEXIFI *)
+let get_props (attrs : attributes) =
+  List.fold_right
+    (fun {attr_name = k; attr_payload = v; attr_loc} acc ->
+       match k, v with
+       | {txt="t"|"lexifi.t"}, PStr[{pstr_desc=Pstr_eval(e,[])}] ->
+           let open Longident in
+           let rec loop acc e =
+             match e.pexp_desc with
+             | Pexp_ident{txt=Lident id} ->
+                 (id, {e with pexp_desc = Pexp_constant(Pconst_string("",None));
+                              pexp_loc = {e.pexp_loc with Location.loc_ghost=true}}) :: acc
+             | Pexp_apply({pexp_desc=Pexp_ident({txt=Lident"="})},
+                          [Nolabel,{pexp_desc=Pexp_ident{txt=Lident id}};Nolabel,e]) ->
+                 (id, e) :: acc
+             | Pexp_sequence (e1, e2) ->
+                 loop (loop acc e2) e1
+             | _ ->
+                 raise Syntaxerr.(Error (Other e.pexp_loc))
+           in
+           loop [] e :: acc
+       | {txt="t"|"lexifi.t"}, PStr[] ->
+           acc
+       | {txt="t"|"lexifi.t"}, _ ->
+           raise Syntaxerr.(Error (Other attr_loc))
+       | _ -> acc
+    )
+    attrs
+    []
+
+let get_str_props attrs =
+  List.map
+    (List.map
+       (function
+         | (k, {pexp_desc=Pexp_constant (Pconst_string (s, _))}) -> (k, s)
+         | _ -> assert false
+       )
+    )
+    (get_props attrs)
+
+let map_props f (attrs : attributes) =
+  List.map
+    (function
+      | {attr_name = {txt="t"|"lexifi.t"} as k; attr_payload = PStr[{pstr_desc=Pstr_eval(e,[])} as p]; attr_loc} ->
+          let open Longident in
+          let rec loop e =
+            match e.pexp_desc with
+            | Pexp_ident{txt=Lident _} ->
+                e
+            | Pexp_apply({pexp_desc=Pexp_ident({txt=Lident "="})} as eq,
+                         [Nolabel,({pexp_desc=Pexp_ident{txt=Lident _}} as e1); Nolabel,e2]) ->
+                {e with pexp_desc=Pexp_apply(eq,[Nolabel,e1;Nolabel,f e2])}
+            | Pexp_sequence(e1,e2) ->
+                {e with pexp_desc=Pexp_sequence(loop e1,loop e2)}
+            | _ ->
+                raise Syntaxerr.(Error (Other e.pexp_loc))
+          in
+          {attr_name = k; attr_payload = PStr[{p with pstr_desc=Pstr_eval(loop e,[])}]; attr_loc}
+      | {attr_name = {txt="t"|"lexifi.t"; _}; attr_payload = PStr[]; _} as x ->
+          x
+      | {attr_name = {txt="t"|"lexifi.t"; _}; attr_loc; _} ->
+          raise Syntaxerr.(Error (Other attr_loc))
+      | x -> x
+    )
+    attrs
+
+let type_props sdecl =
+  match sdecl.ptype_kind with
+  | Ptype_variant cstrs ->
+      List.map (fun c -> List.flatten (get_props c.pcd_attributes)) cstrs
+  | Ptype_record lbls ->
+      List.map (fun l -> List.flatten (get_props l.pld_attributes)) lbls
+  | _ ->
+      []
+
+type typath_step =
+  | Typath_constructor of Longident.t Location.loc * core_type option
+  | Typath_field of Longident.t Location.loc * core_type option
+  | Typath_tuple of int * int
+  | Typath_list of expression
+  | Typath_array of expression
+(* END LEXIFI *)
+
 module Cstr = struct
   let mk self fields =
     {

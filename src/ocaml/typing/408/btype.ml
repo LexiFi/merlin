@@ -300,6 +300,7 @@ let fold_type_expr f init ty =
     let result = f init ty in
     List.fold_left f result tyl
   | Tpackage (_, _, l)  -> List.fold_left f init l
+  | Tprop (_, ty)       -> f init ty
 
 let iter_type_expr f ty =
   fold_type_expr (fun () v -> f v) () ty
@@ -483,6 +484,7 @@ let rec copy_type_desc ?(keep_names=false) f = function
       let tyl = List.map (fun x -> norm_univar (f x)) tyl in
       Tpoly (f ty, tyl)
   | Tpackage (p, n, l)  -> Tpackage (p, n, List.map f l)
+  | Tprop (p, ty)       -> Tprop (p, f ty)
 
 (* Utilities for copying *)
 

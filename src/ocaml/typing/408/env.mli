@@ -43,6 +43,8 @@ type t
 val empty: t
 val initial_safe_string: t
 val initial_unsafe_string: t
+val initial_with_auto_fwd: (unit -> t) ref
+val initial_with_auto: unit -> t (* LEXIFI *)
 val diff: t -> t -> Ident.t list
 val copy_local: from:t -> t -> t
 
@@ -66,6 +68,7 @@ val without_cmis: ('a -> 'b) -> 'a -> 'b
 
 (* Lookup by paths *)
 
+val find_value_in: Path.t -> string -> t -> value_description (* LEXIFI *)
 val find_value: Path.t -> t -> value_description
 val find_type: Path.t -> t -> type_declaration
 val find_type_descrs: Path.t -> t -> type_descriptions
@@ -194,6 +197,8 @@ val filter_non_loaded_persistent : (Ident.t -> bool) -> t -> t
 
 val add_item: signature_item -> t -> t
 val add_signature: signature -> t -> t
+
+val add_signature_include: string -> signature -> t -> t (* LEXIFI *)
 
 (* Insertion of all fields of a signature, relative to the given path.
    Used to implement open. Returns None if the path refers to a functor,
@@ -326,6 +331,8 @@ val set_value_used_callback:
 val set_type_used_callback:
     string -> type_declaration -> ((unit -> unit) -> unit) -> unit
 
+val store_value: Ident.t -> value_description -> t -> t (* LEXIFI *)
+
 (* Forward declaration to break mutual recursion with Includemod. *)
 val check_modtype_inclusion:
       (loc:Location.t -> t -> module_type -> Path.t -> module_type -> unit) ref
@@ -371,6 +378,8 @@ val fold_classes:
 val fold_cltypes:
   (string -> Path.t -> class_type_declaration -> 'a -> 'a) ->
   Longident.t option -> t -> 'a -> 'a
+
+val current_unit: string ref (* LEXIFI *)
 
 (** Utilities *)
 val scrape_alias: t -> module_type -> module_type
