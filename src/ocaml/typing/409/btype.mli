@@ -236,6 +236,9 @@ val iter_type_expr_cstr_args: (type_expr -> unit) ->
 val map_type_expr_cstr_args: (type_expr -> type_expr) ->
   (constructor_arguments -> constructor_arguments)
 
+val remove_props: bool ref
+val keeping_props: (unit -> 'a) -> 'a
+
 (** merlin: internal state *)
 val state : Local_store.bindings
 

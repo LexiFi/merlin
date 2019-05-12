@@ -21,6 +21,8 @@ val valid_tyvar_name : string -> bool
 
 val transl_simple_type:
         Env.t -> bool -> Parsetree.core_type -> Typedtree.core_type
+val transl_simple_type_with_props:
+        Env.t -> bool -> Parsetree.core_type -> Typedtree.core_type
 val transl_simple_type_univars:
         Env.t -> Parsetree.core_type -> Typedtree.core_type
 val transl_simple_type_delayed:
@@ -57,7 +59,9 @@ type error =
   | Variant_tags of string * string
   | Invalid_variable_name of string
   | Cannot_quantify of string * type_expr
+  | Property_outside_type_declaration
   | Multiple_constraints_on_type of Longident.t
+  | Not_a_string_constant (* LEXIFI *)
   | Method_mismatch of string * type_expr * type_expr
   | Unbound_value of Longident.t
   | Unbound_constructor of Longident.t
@@ -93,6 +97,10 @@ val create_package_mty:
     Location.t -> Env.t -> Parsetree.package_type ->
     (Longident.t Asttypes.loc * Parsetree.core_type) list *
       Parsetree.module_type
+
+val approx_expr: Env.t -> Parsetree.expression -> string option
+val really_approx_expr: Env.t -> Parsetree.expression -> string
+
 
 val find_type:
     Env.t -> Location.t -> Longident.t -> Path.t * type_declaration

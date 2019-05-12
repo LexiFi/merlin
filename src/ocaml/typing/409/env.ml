@@ -814,6 +814,13 @@ let find proj1 proj2 path env =
   | Papply _ ->
       raise Not_found
 
+(* BEGIN LEXIFI *)
+let find_value_in p s env =
+  match get_components (find_module_descr p env) with
+  | Structure_comps c -> fst (NameMap.find s c.comp_values)
+  | Functor_comps _f -> raise Not_found
+(* END LEXIFI *)
+
 let find_value_full =
   find (fun env -> env.values) (fun sc -> sc.comp_values)
 and find_type_full =
@@ -2214,6 +2221,31 @@ let rec add_signature sg env =
     [] -> env
   | comp :: rem -> add_signature rem (add_item comp env)
 
+(* BEGIN LEXIFI *)
+let root_attr s =
+  [Ast_helper.Attr.mk (Location.mknoloc "#root#")
+     (Parsetree.PTyp (Ast_helper.Typ.var s))]
+
+let add_item_include root comp env =
+  match comp with
+    Sig_value(id, decl, _)     -> add_value id decl env
+  | Sig_type(id, decl, _, _)   ->
+      let decl = {decl with type_attributes = decl.type_attributes @ root_attr root} in
+      add_type ~check:false ~predef:false id decl env
+  | Sig_typext(id, ext, _, _)  -> add_extension ~check:false id ext env
+  | Sig_module(id, mp, md, _, _)  ->
+      let md = {md with md_attributes = md.md_attributes @ root_attr root} in
+      add_module_declaration ~check:false id mp md env
+  | Sig_modtype(id, decl, _)   -> add_modtype id decl env
+  | Sig_class(id, decl, _, _)  -> add_class id decl env
+  | Sig_class_type(id, decl, _, _) -> add_cltype id decl env
+
+let rec add_signature_include root sg env =
+  match sg with
+    [] -> env
+  | comp :: rem -> add_signature_include root rem (add_item_include root comp env)
+(* END LEXIFI *)
+
 let enter_signature ~scope sg env =
   let sg = Subst.signature (Rescope scope) Subst.identity sg in
   sg, add_signature sg env
@@ -2846,6 +2878,11 @@ let (initial_safe_string, initial_unsafe_string) =
 let add_type ~check id info env =
   add_type ~check ~predef:false id info env
 
+let initial_with_auto_fwd = ref (fun () -> assert false)
+let initial_with_auto =
+  let env = Lazy.from_fun (fun () -> !initial_with_auto_fwd ()) in
+  fun () -> Lazy.force env
+
 (* Return the environment summary *)
 
 let summary env =
@@ -2878,6 +2915,10 @@ let env_of_only_summary env_from_summary env =
     local_constraints = env.local_constraints;
     flags = env.flags;
   }
+
+let store_value id decl env =
+  let addr = value_declaration_address env id decl in
+  store_value ?check:None id addr decl env
 
 (* Error report *)
 

@@ -1122,12 +1122,14 @@ and class_expr_aux cl_num val_env met_env scl =
                   let arg = type_argument val_env sarg0 ty' ty0' in
                   Some (option_some arg)
               with Not_found ->
+                let has_non_labelled = List.mem_assoc Nolabel sargs || List.mem_assoc Nolabel more_sargs in
                 sargs, more_sargs,
-                if Btype.is_optional l
-                   && (List.mem_assoc Nolabel sargs
-                       || List.mem_assoc Nolabel more_sargs)
+                if Btype.is_optional l &&
+                  has_non_labelled
                 then
                   Some (option_none ty0 Location.none)
+                else if has_non_labelled && not !Clflags.pure_caml && Typecore.has_implicit ty then
+                  Some (type_implicit_arg None val_env scl.pcl_loc ty)
                 else None
             in
             let omitted = if arg = None then (l,ty0) :: omitted else omitted in

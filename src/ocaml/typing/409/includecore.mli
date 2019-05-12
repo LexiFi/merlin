@@ -24,6 +24,7 @@ type type_mismatch =
     Arity
   | Privacy
   | Kind
+  | Type_properties
   | Constraint
   | Manifest
   | Variance

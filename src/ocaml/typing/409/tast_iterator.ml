@@ -103,6 +103,7 @@ let structure_item sub {str_desc; str_env; _} =
       List.iter (fun (_, _, cltd) -> sub.class_type_declaration sub cltd) list
   | Tstr_include incl -> include_infos (sub.module_expr sub) incl
   | Tstr_open od -> sub.open_declaration sub od
+  | Tstr_usettype _ -> assert false
   | Tstr_attribute _ -> ()
 
 let value_description sub x = sub.typ sub x.val_desc
@@ -256,6 +257,13 @@ let expr sub {exp_extra; exp_desc; exp_env; _} =
   | Texp_open (od, e) ->
       sub.open_declaration sub od;
       sub.expr sub e
+  | Texp_typath pl ->
+      let aux = function
+        | Ttypath_list e
+        | Ttypath_array e -> sub.expr sub e
+        | _ -> ()
+      in
+      List.iter aux pl
 
 
 let package_type sub {pack_fields; _} =

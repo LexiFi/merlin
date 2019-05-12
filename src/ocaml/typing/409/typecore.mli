@@ -76,6 +76,8 @@ val type_let:
           Typedtree.value_binding list * Env.t
 val type_expression:
         Env.t -> Parsetree.expression -> Typedtree.expression
+val type_implicit_arg:
+  Parsetree.expression option -> Env.t -> Location.t -> Types.type_expr -> Typedtree.expression
 val type_class_arg_pattern:
         string -> Env.t -> Env.t -> arg_label -> Parsetree.pattern ->
         Typedtree.pattern * (Ident.t * Ident.t * type_expr) list *
@@ -110,6 +112,10 @@ type delayed_check
 val delayed_checks: delayed_check list ref
 val reset_delayed_checks: unit -> unit
 val force_delayed_checks: unit -> unit
+
+val add_delayed_check_after_dyntypes: (unit -> unit) -> unit
+val reset_delayed_checks_after_dyntypes: unit -> unit
+val force_delayed_checks_after_dyntypes: unit -> unit
 
 val name_pattern : string -> Typedtree.pattern list -> Ident.t
 
@@ -158,6 +164,9 @@ type error =
   | Not_a_variant_type of Longident.t
   | Incoherent_label_order
   | Less_general of string * Ctype.Unification_trace.t
+  | Lazy_let_complex_pattern (* LEXIFI *)
+  | Min_max_on_bad_type of string * string (* LEXIFI *)
+  | Fields_of_on_bad_type (* LEXIFI *)
   | Modules_not_allowed
   | Cannot_infer_signature
   | Not_a_packed_module of type_expr
@@ -211,6 +220,11 @@ val type_package:
 val create_package_type : Location.t -> Env.t ->
   Longident.t * (Longident.t * Parsetree.core_type) list ->
   Path.t * (Longident.t * Typedtree.core_type) list * Types.type_expr
+
+val is_ttype: type_expr -> type_expr option  (* LEXIFI *)
+val full_name_mod: Env.t -> Path.t -> string (* LEXIFI *)
+val full_name_typ: Env.t -> Path.t -> string (* LEXIFI *)
+val has_implicit: type_expr -> bool          (* LEXIFI *)
 
 val constant: Parsetree.constant -> (Asttypes.constant, error) result
 
