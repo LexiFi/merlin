@@ -3184,7 +3184,12 @@ let (initial_safe_string, initial_unsafe_string) =
     empty
 
 let add_type ~check id info env =
-add_type ~check ~predef:false id info env
+  add_type ~check ~predef:false id info env
+
+let initial_with_auto_fwd = ref (fun () -> assert false)
+let initial_with_auto =
+  let env = Lazy.from_fun (fun () -> !initial_with_auto_fwd ()) in
+  fun () -> Lazy.force env
 
 (* Return the environment summary *)
 

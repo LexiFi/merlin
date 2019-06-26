@@ -271,20 +271,29 @@ let type_object =
 
 (* Helpers for dynamic types *)
 
-let ident_mlfi_types =
-  Ident.create_persistent "Mlfi_types"
+let lookup_type s =
+  try Env.lookup_type (Longident.parse s) (Env.initial_with_auto ())
+  with Not_found -> fatal_error ("Cannot find definition for type " ^ s)
 
-let ident_mlfi_type_path =
-  Ident.create_persistent "Mlfi_type_path"
+let lookup_types s =
+  try
+    let env = Env.initial_with_auto () in
+    let p = Env.lookup_type (Longident.parse s) env in
+    let d = Env.find_type p env in
+    match d.type_manifest with
+    | Some {desc = Tconstr (m, _, _)} -> [m; p]
+    | _ -> [p]
+  with Not_found -> fatal_error ("Cannot find definition for type " ^ s)
 
-let ttype_path =
-  Path.(Pdot (Pident ident_mlfi_types, "ttype"))
+let path_is s =
+  let l = lazy (lookup_types s) in
+  let last = Longident.last (Longident.parse s) in
+  fun p -> Path.last p = last && List.exists (Path.same p) (Lazy.force l)
 
-let call_site_path =
-  Path.(Pdot (Pdot (Pident ident_mlfi_types, "StackTrace"), "call_site"))
+let ttype_path = path_is "Mlfi_types.ttype"
+let call_site_path = path_is "Mlfi_types.StackTrace.call_site"
 
-let typath_type_path =
-  Path.(Pdot (Pident ident_mlfi_type_path, "t"))
+let typath_type_path = lazy (lookup_type "Mlfi_type_path.t")
 
 type auto_type =
   | Auto_ttype of type_expr
@@ -294,8 +303,8 @@ type auto_type =
 let classify_auto_type ty =
   let ty = Ctype.repr ty in
   match ty.desc with
-  | Tconstr(p, [t], _) when Path.same ttype_path p -> Auto_ttype (Ctype.repr t)
-  | Tconstr(p, [], _) when Path.same call_site_path p -> Auto_call_site
+  | Tconstr(p, [t], _) when ttype_path p -> Auto_ttype (Ctype.repr t)
+  | Tconstr(p, [], _) when call_site_path p -> Auto_call_site
   | _ -> Auto_none
 
 let has_implicit ty =
@@ -330,7 +339,7 @@ let rec copy_known_part ty =
 let unshare_ttype node =
   if not !Clflags.pure_caml then
     match (Ctype.repr (node.exp_type)).desc with
-    | Tconstr (p, [_t], _) when Path.same ttype_path p ->
+    | Tconstr (p, [_t], _) when ttype_path p ->
         {node with exp_type = copy_known_part node.exp_type}
     | _ -> node
   else
@@ -3576,7 +3585,7 @@ and type_expect_
       let fields = List.map (fun s -> {prf_desc = Rtag (Location.mknoloc s, true, []); prf_loc = Location.none; prf_attributes = []}) fields in
       let gamma = {ptyp_desc=Ptyp_variant (fields, Open, None); ptyp_loc = Location.none; ptyp_loc_stack=[]; ptyp_attributes=[]} in
       let gamma = (Typetexp.transl_simple_type env true gamma).ctyp_type in
-      let exp_type = newty (Tconstr(typath_type_path, [alpha; beta; gamma], ref Mnil)) in
+      let exp_type = newty (Tconstr(Lazy.force typath_type_path, [alpha; beta; gamma], ref Mnil)) in
       unify_exp_types loc env exp_type ty_expected;
 
       let tsteps = type_typath env loc alpha beta steps in
