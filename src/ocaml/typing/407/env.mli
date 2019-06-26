@@ -41,6 +41,8 @@ type t
 val empty: t
 val initial_safe_string: t
 val initial_unsafe_string: t
+val initial_with_auto_fwd: (unit -> t) ref
+val initial_with_auto: unit -> t (* LEXIFI *)
 val diff: t -> t -> Ident.t list
 val copy_local: from:t -> t -> t
 
