@@ -1,3 +1,7 @@
 configure eol=lf
 *.sh eol=lf
 *.patch eol=lf
+/src/ocaml/preprocess/*/parser_raw.ml -diff
+/src/ocaml/preprocess/*/parser_printer.ml -diff
+/src/ocaml/preprocess/*/parser_recover.ml -diff
+/src/utils/menhirLib.ml* -diff
