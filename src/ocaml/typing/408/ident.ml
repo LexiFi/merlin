@@ -55,6 +55,8 @@ let rename = function
   | Scoped { name; stamp = _; scope = _ } ->
       incr currentstamp;
       Local { name; stamp = !currentstamp }
+  | Global _ as id ->
+      id (* LEXIFI *)
   | id ->
       Misc.fatal_error (Printf.sprintf "Ident.rename %s" (name id))
 
