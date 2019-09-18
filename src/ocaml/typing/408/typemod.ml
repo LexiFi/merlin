@@ -2433,6 +2433,20 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
     | Pstr_extension (({txt="mlfi.lettype"}, PStr[{pstr_desc=Pstr_eval(sexpr,[])}]), _) ->
         let expr = Typecore.type_expression env sexpr in
         Tstr_usettype expr, [], env
+    | Pstr_extension (({txt="t"|"lexifi.t"},
+                       PStr [{pstr_desc =
+                                Pstr_value (Nonrecursive,
+                                            [{pvb_pat = {ppat_desc = Ppat_any | Ppat_constraint ({ppat_desc = Ppat_any}, _) as ppat_desc}; pvb_expr}])}]), _) ->
+        let open Ast_helper in
+        let t =
+          match ppat_desc with
+          | Ppat_any -> Typ.any ()
+          | Ppat_constraint ({ppat_desc = Ppat_any}, t) -> t
+          | _ -> assert false
+        in
+        let t = Typ.constr (mknoloc (Longident.parse "Mlfi_types.ttype")) [t] in
+        let expr = Typecore.type_expression env (Exp.constraint_ pvb_expr t) in
+        Tstr_usettype expr, [], env
 (* END LEXIFI *)
     | Pstr_extension (ext, _attrs) ->
         raise (Error_forward (Builtin_attributes.error_of_extension ext))
@@ -2443,6 +2457,10 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
   let rec type_struct env sstr =
     match sstr with
     | [] -> ([], [], env)
+    | {pstr_desc=Pstr_extension(({txt="sig"|"lexifi.sig"}, PSig sg), _)} :: srem ->
+        let open Ast_helper in
+        let i = Incl.mk (Mod.constraint_ (Mod.structure srem) (Mty.signature sg)) in
+        type_struct env [ Str.include_ i ]
     | {pstr_desc=Pstr_include{pincl_mod={pmod_desc=Pmod_apply({pmod_desc=Pmod_ident {txt=Lident "IGNORE"}},{pmod_desc=Pmod_ident {txt=Lident m}})}};
        pstr_loc} :: srem ->
         Env.explicit_dependency pstr_loc m;

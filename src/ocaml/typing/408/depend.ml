@@ -280,7 +280,12 @@ let rec add_expr bv exp =
         | Ast_helper.Typath_list e | Ast_helper.Typath_array e -> add_expr bv e
       in
       List.iter step (Ast_helper.decode_typath p)
-  | Pexp_extension ({txt="fields_of"}, PTyp sty) ->
+  | Pexp_extension ({txt="p"|"lexifi.p"},PStr str) ->
+      add_module_path bv (mknoloc (Lident "Mlfi_type_path"));
+      add_implementation bv str
+  | Pexp_extension ({txt="lazy"|"lexifi.lazy"|"t"|"lexifi.t"},PStr str) ->
+      add_implementation bv str
+  | Pexp_extension ({txt="fields_of"|"lexifi.fields_of"|"t"|"lexifi.t"}, PTyp sty) ->
       add_type bv sty
   | Pexp_extension e -> handle_extension e
   | Pexp_unreachable -> ()
@@ -523,7 +528,13 @@ and add_struct_item (bv, m) item : _ String.Map.t * _ String.Map.t =
       (add bv, add m)
   | Pstr_extension (({txt="mlfi.lettype"}, PStr[{pstr_desc=Pstr_eval(e,[])}]), _) ->
       add_expr bv e; (bv, m)
+  | Pstr_extension (({txt="t"|"lexifi.t"}, PStr[{pstr_desc=Pstr_value(_,[{pvb_pat=p;pvb_expr=e}])}]),_) ->
+      let bv = add_pattern bv p in
+      add_expr bv e; (bv, m)
   | Pstr_attribute _ -> (bv, m)
+  | Pstr_extension (({txt="sig"|"lexifi.sig"},PSig sg),_) ->
+      add_signature bv sg;
+      (bv, m)
   | Pstr_extension (e, _) ->
       handle_extension e;
       (bv, m)

@@ -47,6 +47,100 @@ let is_lazy_let e =
 let remove_lazy_attr =
   List.filter (function {attr_name={txt="mlfi.lazy"};_} -> false | _ -> true)
 
+type gregorian = {
+    year : int;
+    month : int;
+    day : int;
+    hour : int;
+    minute : int
+  }
+
+let hours_in_day = 24
+let minutes_in_day = hours_in_day * 60
+
+(*
+   Communications of the ACM by Henry F. Fliegel and Thomas C. Van Flandern,
+   ``A Machine Algorithm for Processing Calendar Dates'',
+   CACM, volume 11, number 10, October 1968, p. 657
+*)
+let date_of_gregorian {year = y; month = m; day = d; hour = hr; minute = mn} =
+  let t =
+    (
+     (match m with
+     | 1 | 2 ->
+         ( 1461 * ( y + 4800 - 1 ) ) / 4 +
+           ( 367 * ( m + 10 ) ) / 12 -
+           ( 3 * ( ( y + 4900 - 1 ) / 100 ) ) / 4
+     | _ ->
+         ( 1461 * ( y + 4800 ) ) / 4 +
+           ( 367 * ( m - 2 ) ) / 12 -
+           ( 3 * ( ( y + 4900 ) / 100 ) ) / 4)
+       + d - 32075 - 2444238) * minutes_in_day
+      + hr * 60 + mn in
+  (* force result to be in [min_date; max_date]. *)
+  if t < 3600 then 3600 else if 168307199 < t then 168307199 else
+    t
+
+let check_date ~year ~month ~day =
+  1 <= day &&
+  1 <= month && month <= 12 &&
+  1980 <= year && year <= 2299 &&
+  begin day <= 28 || match month with
+    | 2 -> day = 29 && year land 3 = 0 && year <> 2100 && year <> 2200
+    | 4 | 6 | 9 | 11 -> day <= 30
+    | _ -> day <= 31
+  end
+
+let date_of_str_const s =
+  let i = ref 0 in
+  let read_int n =
+    assert (n >= 0);
+    if !i + n > String.length s then raise Exit;
+    let r = ref 0 in
+    for _ = 1 to n do
+      match s.[!i] with
+      | '0'..'9' as c ->
+          incr i;
+          r := !r * 10 + (Char.code c - Char.code '0')
+      | _ ->
+          raise Exit
+    done;
+    !r
+  in
+  let read_char c =
+    if !i >= String.length s then raise Exit;
+    if s.[!i] <> c then raise Exit;
+    incr i
+  in
+  let next () =
+    if !i >= String.length s then
+      None
+    else
+      (let c = s.[!i] in incr i; Some c)
+  in
+  let year = read_int 4 in
+  read_char '_';
+  let month = read_int 2 in
+  read_char '_';
+  let day = read_int 2 in
+  let hour, minute =
+    match next () with
+    | None ->
+        12, 0
+    | Some '.' ->
+        let hour = read_int 2 in
+        let minute = read_int 2 in
+        hour, minute
+    | Some _ ->
+        raise Exit
+  in
+  {year; month; day; hour; minute}
+
+let date_of_str_const s =
+  match date_of_str_const s with
+  | g -> Some g
+  | exception Exit -> None
+
 type type_forcing_context =
   | If_conditional
   | If_no_else_branch
@@ -382,6 +476,8 @@ let iter_expression f e =
             | _ -> ()
           )
           (Ast_helper.decode_typath p)
+    | Pexp_extension ({txt="lazy"|"lexifi.lazy"|"p"|"lexifi.p"},PStr str) ->
+        List.iter structure_item str
     | Pexp_extension _ (* we don't iterate under extension point *)
     | Pexp_ident _
     | Pexp_new _
@@ -445,7 +541,8 @@ let iter_expression f e =
 
   and structure_item str =
     match str.pstr_desc with
-    | Pstr_extension (({txt="mlfi.lettype"}, PStr[{pstr_desc=Pstr_eval(e,[])}]), _) (* LEXIFI *)
+    | Pstr_extension (({txt="mlfi.lettype"|"t"|"lexifi.t"}, PStr str), _) ->
+        List.iter structure_item str
     | Pstr_eval (e, _) -> expr e
     | Pstr_value (_, pel) -> List.iter binding pel
     | Pstr_primitive _
@@ -2004,6 +2101,7 @@ let rec final_subexpression sexp =
   | Pexp_try (e, _)
   | Pexp_ifthenelse (_, e, _)
   | Pexp_match (_, {pc_rhs=e} :: _)
+  | Pexp_extension ({txt="lazy"|"lexifi.lazy"}, PStr[{pstr_desc=Pstr_eval(e,_)}])
     -> final_subexpression e
   | _ -> sexp
 
@@ -2207,6 +2305,8 @@ let rec type_approx env sexp =
         raise(error(sexp.pexp_loc, env, Expr_type_clash (trace, None)))
       end;
       ty2
+  | Pexp_extension ({txt="lazy"|"lexifi.lazy"},PStr[{pstr_desc=Pstr_eval(e,_)}]) ->
+      type_approx env e
   | _ -> newvar ()
 
 (* List labels in a function type, and whether return type is a variable *)
@@ -2528,6 +2628,11 @@ let unify_exp env exp expected_ty =
   let loc = proper_exp_loc exp in
   unify_exp_types loc env exp.exp_type expected_ty
 
+let ttype_of ~loc sty =
+  let open Ast_helper.Exp in
+  apply ~loc (ident ~loc (mkloc (Longident.parse "Mlfi_types.internal_ttype_of") loc))
+    [Nolabel, constraint_ ~loc (assert_ ~loc (construct ~loc (mkloc (Longident.Lident "false") loc) None)) sty]
+
 let rec type_exp ?recarg env sexp =
   (* We now delegate everything to type_expect *)
   type_expect ?recarg env sexp (mk_expected (newvar ()))
@@ -2639,6 +2744,30 @@ and type_expect_
         exp_type = ty;
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
+  | Pexp_constant(Pconst_integer(s,Some('t'|'T'))|Pconst_float(s,Some('t'|'T'))) ->
+      let g =
+        match date_of_str_const s with
+        | None ->
+          raise Syntaxerr.(Error (Illegal_date_format loc))
+        | Some g ->
+          g
+      in
+      let check_date {year; month; day; hour; minute} =
+        check_date ~year ~month ~day &&
+        0 <= hour && hour <= 23 && 0 <= minute && minute <= 59
+      in
+      if not (check_date g) then
+        raise Syntaxerr.(Error (Illegal_date_value loc));
+      let open Ast_helper in
+      let e =
+        Exp.apply ~loc
+          (Exp.ident ~loc (mkloc (Longident.parse "Stdlib.date_of_int") loc))
+          [Nolabel,
+           Exp.constant ~loc
+             (Const.integer
+                (string_of_int (date_of_gregorian g)))]
+      in
+      type_expect env e ty_expected_explained
   | Pexp_constant(Pconst_string (str, _) as cst) -> (
     let cst = constant_or_raise env loc cst in
     (* Terrible hack for format strings *)
@@ -3566,35 +3695,29 @@ and type_expect_
       in
       re { exp with exp_extra =
              (Texp_poly cty, loc, sexp.pexp_attributes) :: exp.exp_extra }
-  | Pexp_extension ({txt="mlfi.typath"}, p) ->
-      let steps = Ast_helper.decode_typath p in
-      let alpha = newgenvar () in
-      let beta = newgenvar () in
-      let fields =
-        match steps with
-        | [ Ast_helper.Typath_constructor _ ] -> ["Constructor"]
-        | [ Ast_helper.Typath_field _ ] -> ["Field"]
-        | [ Ast_helper.Typath_tuple _ ] -> ["Tuple"]
-        | [ Ast_helper.Typath_list _ ] -> ["List"]
-        | [ Ast_helper.Typath_array _ ] -> ["Array"]
-        | [] -> ["Root"]
-        | _ :: _ :: _ ->
-            ["Constructor";"Field";"Tuple";"List";"Array";"Root"]
+  | Pexp_extension ({txt="t"|"lexifi.t"},
+                    PStr [{pstr_desc =
+                             Pstr_eval ({pexp_desc =
+                                           Pexp_let (Nonrecursive,
+                                                     [{pvb_pat = {ppat_desc = Ppat_any | Ppat_constraint ({ppat_desc = Ppat_any}, _) as ppat_desc}; pvb_expr}], e)}, _)}]) ->
+      let e =
+        let open Ast_helper in
+        let pvb_expr =
+          let t =
+            match ppat_desc with
+            | Ppat_any -> Typ.any ()
+            | Ppat_constraint ({ppat_desc = Ppat_any}, t) -> t
+            | _ -> assert false
+          in
+          let t = Typ.constr (mknoloc (Longident.parse "Mlfi_types.ttype")) [t] in
+          Exp.constraint_ ~loc pvb_expr t
+        in
+        Exp.apply ~loc (Exp.ident ~loc (mkloc (Longident.parse "Mlfi_types.__use_ttype") loc))
+          [Nolabel, pvb_expr; Nolabel, e]
       in
-      (* Generate open types such as "(_, _, [>`Constructor]) Mlfi_type_path.t" *)
-      let fields = List.map (fun s -> {prf_desc = Rtag (Location.mknoloc s, true, []); prf_loc = Location.none; prf_attributes = []}) fields in
-      let gamma = {ptyp_desc=Ptyp_variant (fields, Open, None); ptyp_loc = Location.none; ptyp_loc_stack=[]; ptyp_attributes=[]} in
-      let gamma = (Typetexp.transl_simple_type env true gamma).ctyp_type in
-      let exp_type = newty (Tconstr(Lazy.force typath_type_path, [alpha; beta; gamma], ref Mnil)) in
-      unify_exp_types loc env exp_type ty_expected;
-
-      let tsteps = type_typath env loc alpha beta steps in
-      begin match (repr beta).desc with
-      | Tconstr(p, _, _) when Path.is_constructor_typath p ->
-          raise (Error (loc, env, Inlined_record_escape));
-      | _ -> ()
-      end;
-
+      type_expect env e ty_expected_explained
+  | Pexp_extension ({txt="p"|"lexifi.p"}, PStr []) ->
+      let tsteps, exp_type = type_typath env loc [] ty_expected in
       rue {
         exp_desc = Texp_typath tsteps;
         exp_loc = sexp.pexp_loc;
@@ -3603,6 +3726,63 @@ and type_expect_
         exp_env = env;
         exp_attributes = sexp.pexp_attributes;
       }
+  | Pexp_extension ({txt="p"|"lexifi.p"}, PStr [{pstr_desc=Pstr_eval(e,_)}]) ->
+      let open Ast_helper in
+      let rec inner acc ty_constraint e =
+        match e.pexp_desc with
+        | Pexp_ident lid ->
+            Typath_field (lid, ty_constraint) :: acc
+        | Pexp_apply ({pexp_desc=Pexp_ident {txt=Lident"/"}},
+                      [Nolabel, {pexp_desc=Pexp_constant(Pconst_integer(a,None))};
+                       Nolabel, {pexp_desc=Pexp_constant(Pconst_integer(b,None))}]) ->
+            Typath_tuple (int_of_string a, int_of_string b) :: acc
+        | Pexp_construct (lid, None) ->
+            Typath_constructor (lid, ty_constraint) :: acc
+        | Pexp_construct ({txt=Lident"::"}, Some{pexp_desc=Pexp_tuple [e; {pexp_desc=Pexp_construct({txt=Lident"[]"}, None)}]}) ->
+            Typath_list e :: acc
+        | Pexp_array [e] ->
+            Typath_array e :: acc
+        | Pexp_constraint (e, ty_constraint) ->
+            inner acc (Some ty_constraint) e
+        | _ ->
+            raise Syntaxerr.(Error (Other e.pexp_loc))
+      and outer ty_constraint e =
+        match e.pexp_desc with
+        | Pexp_field (e, lid) ->
+            Typath_field (lid, ty_constraint) :: outer None e
+        | Pexp_apply ({pexp_desc=Pexp_ident{txt=Ldot(Lident"String", "get")}}, [Nolabel, e1; Nolabel, e2]) ->
+            Typath_list e2 :: outer None e1
+        | Pexp_apply ({pexp_desc=Pexp_ident{txt=Ldot(Lident"Array", "get")}}, [Nolabel, e1; Nolabel, e2]) ->
+            inner (outer None e1) ty_constraint e2
+        | Pexp_constraint (e, ty_constraint) ->
+            outer (Some ty_constraint) e
+        | _ ->
+            inner [] ty_constraint e
+      in
+      let steps = List.rev (outer None e) in
+      (* let steps' = encode_typath steps in
+      Format.eprintf "%a@." Pprintast.structure [Str.attribute (Attr.mk (Location.mknoloc "typath") steps')]; *)
+      let tsteps, exp_type = type_typath env loc steps ty_expected in
+      rue {
+        exp_desc = Texp_typath tsteps;
+        exp_loc = sexp.pexp_loc;
+        exp_type;
+        exp_extra = [];
+        exp_env = env;
+        exp_attributes = sexp.pexp_attributes;
+      }
+  | Pexp_extension ({txt="mlfi.typath"}, p) ->
+      let tsteps, exp_type = type_typath env loc (Ast_helper.decode_typath p) ty_expected in
+      rue {
+        exp_desc = Texp_typath tsteps;
+        exp_loc = sexp.pexp_loc;
+        exp_type;
+        exp_extra = [];
+        exp_env = env;
+        exp_attributes = sexp.pexp_attributes;
+      }
+  | Pexp_extension ({txt="t"|"lexifi.t"}, PTyp sty) ->
+      type_expect env (ttype_of ~loc sty) ty_expected_explained
   | Pexp_extension ({txt="fields_of"}, PTyp sty) ->
       let ty = (Typetexp.transl_simple_type env false sty).ctyp_type in
       let ty = Ctype.expand_head env ty in
@@ -3634,6 +3814,9 @@ and type_expect_
             raise(Error(sexp.pexp_loc, env, Fields_of_on_bad_type))
       in
       type_expect env e (mk_expected ty_expected)
+  | Pexp_extension ({txt="lazy"|"lexifi.lazy"},PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_let _} as e, _)}]) ->
+      let e = {e with pexp_attributes = lazy_attr :: e.pexp_attributes} in
+      type_expect env e ty_expected_explained
 
   | Pexp_newtype({txt=name}, sbody) ->
       let ty = newvar () in
@@ -3829,14 +4012,43 @@ and type_expect_
            exp_attributes = sexp.pexp_attributes;
            exp_env = env }
 
-and type_typath env loc alpha beta = function
-  | [] -> unify_exp_types loc env alpha beta; []
-  | [s] -> [type_typath_step env loc alpha beta s]
-  | s :: rest ->
-      let gamma = newgenvar () in
-      let ts = type_typath_step env loc alpha gamma s in
-      let trest = type_typath env loc gamma beta rest in
-      ts :: trest
+and type_typath env loc steps ty_expected =
+  let alpha = newgenvar () in
+  let beta = newgenvar () in
+  let fields =
+    match steps with
+    | [ Ast_helper.Typath_constructor _ ] -> ["Constructor"]
+    | [ Ast_helper.Typath_field _ ] -> ["Field"]
+    | [ Ast_helper.Typath_tuple _ ] -> ["Tuple"]
+    | [ Ast_helper.Typath_list _ ] -> ["List"]
+    | [ Ast_helper.Typath_array _ ] -> ["Array"]
+    | [] -> ["Root"]
+    | _ :: _ :: _ ->
+        ["Constructor";"Field";"Tuple";"List";"Array";"Root"]
+  in
+  (* Generate open types such as "(_, _, [>`Constructor]) Mlfi_type_path.t" *)
+  let fields = List.map (fun s -> {prf_desc = Rtag (Location.mknoloc s, true, []); prf_loc = Location.none; prf_attributes = []}) fields in
+  let gamma = {ptyp_desc=Ptyp_variant (fields, Open, None); ptyp_loc=Location.none; ptyp_loc_stack = []; ptyp_attributes=[]} in
+  let gamma = (Typetexp.transl_simple_type env true gamma).ctyp_type in
+  let exp_type = newty (Tconstr(Lazy.force typath_type_path, [alpha; beta; gamma], ref Mnil)) in
+  unify_exp_types loc env exp_type ty_expected;
+  let tsteps =
+    let rec go alpha beta = function
+      | [] -> unify_exp_types loc env alpha beta; []
+      | [s] -> [type_typath_step env loc alpha beta s]
+      | s :: rest ->
+          let gamma = newgenvar () in
+          let ts = type_typath_step env loc alpha gamma s in
+          let trest = go gamma beta rest in
+          ts :: trest
+    in go alpha beta steps
+  in
+  begin match (repr beta).desc with
+  | Tconstr(p, _, _) when Path.is_constructor_typath p ->
+      raise (Error (loc, env, Inlined_record_escape));
+  | _ -> ()
+  end;
+  tsteps, exp_type
 
 and type_typath_step env loc alpha beta = function
   | Ast_helper.Typath_constructor (tp, sty) ->
@@ -5246,7 +5458,6 @@ and type_let ?(lazy_flag = NonLazy) ?bind
 and type_implicit_arg sexp env loc ty =
   let ghloc = {loc with Location.loc_ghost = true} in
   let mk e = Ast_helper.Exp.mk ~loc:ghloc e in
-  let apply f args = mk (Pexp_apply (mk (Pexp_ident (mknoloc (Longident.parse f))), args)) in
   let construct c args =
     let a = match args with
       | [] -> None
@@ -5265,7 +5476,7 @@ and type_implicit_arg sexp env loc ty =
       match e.pexp_desc with
       | Pexp_constant (Pconst_string (s, _)) ->
           construct "Mlfi_types.StackTrace.String" [str s]
-      | Pexp_constant (Pconst_integer _) as d ->
+      | Pexp_constant (Pconst_integer(_,None)) as d ->
           construct "Mlfi_types.StackTrace.Int" [mk d]
       | Pexp_constant (Pconst_float (s, _)) ->
           construct "Mlfi_types.StackTrace.Float" [str s]
@@ -5301,9 +5512,7 @@ and type_implicit_arg sexp env loc ty =
 
   match classify_auto_type ty with
   | Auto_ttype t ->
-      let f = "Mlfi_types.internal_ttype_of" in
-      let e = apply f [Nolabel, mk (Pexp_assert (mk (Pexp_construct(mknoloc (Longident.Lident "false"), None))))] in
-      let e = type_expect env e (mk_expected ty) in
+      let e = type_expect env (ttype_of ~loc:ghloc (Ast_helper.Typ.any ())) (mk_expected ty) in
       begin match (Ctype.repr t).desc, !level_for_implicit_ttype with
       | Tvar _, None -> unify_exp env e (new_global_var ())
       | Tvar _, Some lvl -> unify_exp env e (Btype.newty2 lvl (Tvar None))

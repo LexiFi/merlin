@@ -1144,6 +1144,7 @@ implementation:
     { $1 }
 | SIG signature END structure EOF
     {
+      Location.deprecated_syntax (make_loc $loc($1)) "use `[%%sig: ...]' instead.";
       let sg = mkmty ~loc:$loc($2) (Pmty_signature $2) in
       let str = mkmod ~loc:$loc($4) (Pmod_structure $4) in
       let i = Incl.mk (mkmod ~loc:$sloc (Pmod_constraint(str, sg))) ~attrs:[]
@@ -1379,6 +1380,7 @@ structure [@recovery []]:
           Pstr_extension ($1, add_docs_attrs docs $2) }
     | LET TYPE EQUAL seq_expr
         {
+          Location.deprecated_syntax (make_loc ($startpos($1), $endpos($3))) "use `let%t _ = ...' instead.";
           let t =
             ghtyp ~loc:$sloc
               (Ptyp_constr(mknoloc (Ldot (Lident "Mlfi_types", "ttype")), [mktyp ~loc:$sloc (Ptyp_any)]))
@@ -1388,7 +1390,8 @@ structure [@recovery []]:
           Pstr_extension ((mknoloc "mlfi.lettype", payload), [])
         }
     | LET TYPE COLON core_type EQUAL seq_expr
-        {
+       {
+         Location.deprecated_syntax (make_loc ($startpos($1), $endpos($5))) "use `let%t _ : ... = ...' instead.";
          let t = mktyp ~loc:$loc($4) (Ptyp_constr(mknoloc (Ldot (Lident "Mlfi_types", "ttype")), [$4])) in
          let e = mkexp ~loc:$loc($6) (Pexp_constraint($6, t)) in
          let payload = PStr[Ast_helper.Str.eval e] in
@@ -2216,12 +2219,15 @@ let_pattern [@recovery default_pattern ()]:
   | let_bindings(ext) IN seq_expr
       { expr_of_let_bindings ~loc:$sloc $1 $merloc(2, 3) }
   | LAZY let_bindings(ext) IN seq_expr
-      { expr_of_let_bindings ~loc:$sloc
+      { Location.deprecated_syntax (make_loc $loc($1)) "use `let%lazy ... = ...' instead.";
+        expr_of_let_bindings ~loc:$sloc
           ~attrs:[Attr.mk ~loc:(make_loc $loc($1)) (mknoloc "mlfi.lazy") (PStr [])] $2 $4 }
   | LET TYPE EQUAL seq_expr IN seq_expr  /*todo: attributes*/
-      { apply_use_ttype ~loc:$sloc $4 $6 }
+      { Location.deprecated_syntax (make_loc ($startpos($1), $endpos($3))) "use `let%t _ = ... in ...' instead.";
+        apply_use_ttype ~loc:$sloc $4 $6 }
   | LET TYPE COLON core_type EQUAL seq_expr IN seq_expr /*todo: attributes*/
-      { let t = mktyp ~loc:$sloc (Ptyp_constr(mknoloc (Ldot (Lident "Mlfi_types", "ttype")), [$4])) in
+      { Location.deprecated_syntax (make_loc ($startpos($1), $endpos($5))) "use `let%t _ : ... = ... in ...' instead.";
+        let t = mktyp ~loc:$sloc (Ptyp_constr(mknoloc (Ldot (Lident "Mlfi_types", "ttype")), [$4])) in
         apply_use_ttype ~loc:$sloc (mkexp ~loc:$sloc (Pexp_constraint($6, t))) $8 }
   | pbop_op = mkrhs(LETOP) bindings = letop_bindings IN body = seq_expr
       { let (pbop_pat, pbop_exp, rev_ands) = bindings in
@@ -2298,7 +2304,8 @@ let_pattern [@recovery default_pattern ()]:
   | OBJECT ext_attributes class_structure error
       { unclosed "object" $loc($1) "end" $loc($4) }
   | typath = nonempty_llist(type_path_expr)
-      { Pexp_extension (mknoloc "mlfi.typath", Ast_helper.encode_typath typath), (None, []) }
+      { Location.deprecated_syntax (make_loc $sloc) "use `[%p ...]' instead.";
+        Pexp_extension (mknoloc "mlfi.typath", Ast_helper.encode_typath typath), (None, []) }
 ;
 
 type_path_expr_core:
@@ -2346,10 +2353,12 @@ type_path_expr:
         let (t1, t2) = $3 in
         match !Clflags.pure_caml, $2 with
         | false, {pexp_desc = Pexp_ident{txt = Lident "type_of"}} ->
+            Location.deprecated_syntax (make_loc $sloc) "use `stype_of_ttype [%t: ...]' instead.";
             mkexp ~loc:$sloc
               (ghfct_apply ~loc:$sloc "Mlfi_types.stype_of_ttype"
                  [type_of_of_type ~loc:$sloc t1 t2])
         | false, {pexp_desc = Pexp_ident{txt = Lident "ttype_of"}} ->
+            Location.deprecated_syntax (make_loc $sloc) "use `[%t: ...]' instead.";
             type_of_of_type ~loc:$sloc t1 t2
         | _ ->
            mkexp_constraint ~loc:$sloc $2 $3
@@ -2451,7 +2460,8 @@ type_path_expr:
   | simple_expr HASH mkrhs(method_label)
       { Pexp_send($1, $3) }
   | simple_expr HASH LPAREN mkrhs(method_label) nonempty_llist(labeled_simple_expr) RPAREN
-      { Pexp_apply(mkexp ~loc:$sloc (Pexp_send($1, $4)), $5) }
+      { Location.deprecated_syntax (make_loc ($startpos($3), $endpos($6))) "use parentheses around the complete method call";
+        Pexp_apply(mkexp ~loc:$sloc (Pexp_send($1, $4)), $5) }
   | simple_expr op(HASHOP) simple_expr
       { mkinfix $1 $2 $3 }
   | extension
@@ -2517,7 +2527,8 @@ type_path_expr:
     LPAREN MODULE ext_attributes module_expr COLON error
       { unclosed "(" $loc($3) ")" $loc($8) }
   | LPAREN DOT RPAREN
-      { Pexp_extension (mknoloc "mlfi.typath", Ast_helper.encode_typath []) }
+      { Location.deprecated_syntax (make_loc $sloc) "use `[%p]' instead.";
+        Pexp_extension (mknoloc "mlfi.typath", Ast_helper.encode_typath []) }
 ;
 labeled_simple_expr:
     simple_expr %prec below_HASH
@@ -2922,7 +2933,8 @@ value_description:
   COLON
   ty = core_type
   EQUAL e = expr attrs2 = post_item_attributes
-    { let attr =
+    { Location.deprecated_syntax (make_loc ($startpos($7), $endpos(e))) "use `[@val ...]' instead.";
+      let attr =
         Attr.mk ~loc:(ghost_loc $sloc) (mknoloc "mlfi.val_expr")
           (PStr[Ast_helper.Str.eval e])
       in
@@ -2939,7 +2951,9 @@ value_description:
 opt_props:
     /*empty*/
     { [] }
-  | WITH LBRACKET with_propss RBRACKET { $3 }
+  | WITH LBRACKET with_propss RBRACKET
+    { Location.deprecated_syntax (make_loc $sloc) "use `[@@t ...]' instead.";
+      $3 }
 ;
 
 primitive_declaration:
@@ -3203,7 +3217,9 @@ label_declaration:
 
 opt_plus_props:
      /*empty*/ { [] }
-  |  PLUS LBRACKET with_propss RBRACKET { $3 }
+  |  PLUS LBRACKET with_propss RBRACKET
+       { Location.deprecated_syntax (make_loc $sloc) "use `[@t ...]' instead.";
+         $3 }
 ;
 
 label_declaration_semi:
@@ -3574,7 +3590,8 @@ meth_list:
 ;
 
 method_label:
-    UIDENT                                      { $1 }
+    UIDENT                                      { Location.deprecated_syntax (make_loc $sloc) (Printf.sprintf "use `_%s' instead." $1);
+                                                  $1 }
   | LIDENT                                      { $1 }
 ;
 

@@ -279,12 +279,11 @@ let date_of_string lexbuf =
   let month = sub 5 2 in
   let day = sub 8 2 in
   if check_date ~year ~month ~day
-  then
-    date_of_gregorian
-      (if Lexing.lexeme_end lexbuf - Lexing.lexeme_start lexbuf < 16
-       then (year, month, day, (*hour*) 12, (*minute*) 0)
-       else (year, month, day, (*hour*) sub 11 2, (*minute*) sub 14 2))
-  else raise (Error(Illegal_date_value, Location.curr lexbuf))
+  then begin
+    if Lexing.lexeme_end lexbuf - Lexing.lexeme_start lexbuf < 16
+    then (year, month, day, 12, 0)
+    else (year, month, day, sub 11 2, sub 14 2)
+  end else raise (Error(Illegal_date_value, Location.curr lexbuf))
 
 
 let is_keyword name = Hashtbl.mem keyword_table name
@@ -508,9 +507,11 @@ rule token state = parse
         state.pending_tokens <- [LABEL id2];
         return (LIDENT id1)
       }
-  | lowercase identchar * '~'
+  | (lowercase identchar * as s) '~'
       {
-        return (LIDENT (Lexing.lexeme lexbuf))
+        let s = s ^ "_" in
+        Location.deprecated_syntax (Location.curr lexbuf) (Printf.sprintf "use `%s' instead." s);
+        return (LIDENT s)
       }
 (* END LEXIFI *)
 
@@ -523,9 +524,8 @@ rule token state = parse
               try Hashtbl.find keyword_table name
               with Not_found ->
                 UIDENT name) }
-  | int_literal '~'
-      { let s = Lexing.lexeme lexbuf in
-        let s = String.sub s ~pos:0 ~len:(String.length s - 1) in
+  | (int_literal as s) '~'
+      { Location.deprecated_syntax (Location.curr lexbuf) (Printf.sprintf "use `cst %s' instead." s);
         return (INT_OBS (int_of_string(s))) }
   | uppercase_latin1 identchar_latin1 * as name
     { warn_latin1 lexbuf; return (UIDENT name) }
@@ -538,14 +538,29 @@ rule token state = parse
     { return (FLOAT (lit, Some modif)) }
   | (float_literal | hex_float_literal | int_literal) identchar+ as invalid
     { fail lexbuf (Invalid_literal invalid) }
-  | float_literal '~'
-      { let s = Lexing.lexeme lexbuf in
-        let s = String.sub s ~pos:0 ~len:(String.length s - 1) in
+  | (float_literal as s) '~'
+      { Location.deprecated_syntax (Location.curr lexbuf) (Printf.sprintf "use `cst %s' instead." s);
         return (FLOAT_OBS s) }
   | date_literal '~'
-      { return (DATE_OBS(date_of_string(lexbuf))) }
+      { let (year, month, day, hour, minute) as t = date_of_string lexbuf in
+        let rep =
+          if hour = 12 && minute = 0 then
+            Printf.sprintf "%04d_%02d_%02dT" year month day
+          else
+            Printf.sprintf "%04d_%02d_%02d.%02d%02dT" year month day hour minute
+        in
+        Location.deprecated_syntax (Location.curr lexbuf) (Printf.sprintf "use `cst %s' instead." rep);
+        return (DATE_OBS (date_of_gregorian t)) }
   | date_literal
-      { return (DATE(date_of_string(lexbuf))) }
+      { let (year, month, day, hour, minute) as t = date_of_string lexbuf in
+        let rep =
+          if hour = 12 && minute = 0 then
+            Printf.sprintf "%04d_%02d_%02dT" year month day
+          else
+            Printf.sprintf "%04d_%02d_%02d.%02d%02dT" year month day hour minute
+        in
+        Location.deprecated_syntax (Location.curr lexbuf) (Printf.sprintf "use `%s' instead." rep);
+        return (DATE (date_of_gregorian t)) }
   | bad_date_literal
       { raise (Error(Illegal_date_format, Location.curr lexbuf )) }
   | bad_date_literal '~'

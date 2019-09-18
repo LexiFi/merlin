@@ -1427,6 +1427,8 @@ let transl_value_decl env loc valdecl =
     [] when Env.is_in_signature env ->
       let approx =
         try Some (List.find (function {attr_name = {txt = "mlfi.val_expr"; _}; _} -> true | _ -> false) valdecl.pval_attributes)
+        with Not_found ->
+        try Some (List.find (function {attr_name = {txt = "val"|"lexifi.val"; _}; _} -> true | _ -> false) valdecl.pval_type.ptyp_attributes)
         with Not_found -> None
       in
       let approx =
