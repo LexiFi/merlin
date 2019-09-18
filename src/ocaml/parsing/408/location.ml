@@ -755,8 +755,8 @@ let alert ?(def = none) ?(use = none) ~kind loc message =
 let deprecated ?def ?use loc message =
   alert ?def ?use ~kind:"deprecated" loc message
 
-let deprecated_syntax ?def ?use loc message =
-  alert ?def ?use ~kind:"deprecated_syntax" loc message
+let deprecated_syntax ?def:_ ?use:_ loc message =
+  prerr_warning loc (Warnings.Deprecated_syntax message)
 
 (******************************************************************************)
 (* Reporting errors on exceptions *)

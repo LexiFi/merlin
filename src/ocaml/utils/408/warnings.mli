@@ -26,6 +26,7 @@ type t =
   | Unused_explicit_dependency of string    (* 107 *)
   | Bad_witness_for_abstract_type of string (* 108 *)
   | Not_a_global_type of string             (* 110 *)
+  | Deprecated_syntax of string             (* 111 *)
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
 (*| Deprecated --> alert "deprecated" *)    (*  3 *)

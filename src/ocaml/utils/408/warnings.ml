@@ -33,6 +33,7 @@ type t =
   | Unused_explicit_dependency of string    (* 107 *)
   | Bad_witness_for_abstract_type of string (* 108 *)
   | Not_a_global_type of string             (* 110 *)
+  | Deprecated_syntax of string             (* 111 *)
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
 (*| Deprecated --> alert "deprecated" *)    (*  3 *)
@@ -117,6 +118,7 @@ let number = function
   | Unused_explicit_dependency _ -> 107
   | Bad_witness_for_abstract_type _ -> 108
   | Not_a_global_type _ -> 110
+  | Deprecated_syntax _ -> 111
   | Comment_start -> 1
   | Comment_not_end -> 2
   | Fragile_match _ -> 4
@@ -185,7 +187,7 @@ let number = function
 ;;
 
 let last_ocaml_warning_number = 66
-let last_warning_number = 110
+let last_warning_number = 111
 ;;
 
 (* Must be the max number returned by the [number] function. *)
@@ -498,6 +500,8 @@ let message = function
       "bad source file name: \"" ^ modname ^ "\" is not a valid module name."
   | Missed_punning ->
       "missed punning opportunity"
+  | Deprecated_syntax s ->
+      s
   | Non_ascii_character_in_string i ->
       Printf.sprintf "Non ascii character (\\%i) in string" i
   | Unused_explicit_dependency s ->
