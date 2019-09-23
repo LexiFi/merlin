@@ -365,7 +365,7 @@ let set_findlib_path =
       let env_ocamlpath = match path with
         | [] -> None
         | path -> Some (String.concat ~sep:path_separator path)
-      and config = match conf with
+      and _config = match conf with
         | "" -> None
         | s -> Some s
       and toolchain = match toolchain with
@@ -374,7 +374,7 @@ let set_findlib_path =
       in
       log ~title:"set_findlib_path" "findlib_conf = %s; findlib_path = %s\n"
         conf (String.concat ~sep:path_separator path);
-      Findlib.init ?env_ocamlpath ?config ?toolchain ();
+      Findlib.init ?env_ocamlpath ~config:"" ?toolchain ();
       findlib_cache := key
     end
 

@@ -342,8 +342,8 @@ matching and prints the corresponding module name."
       optional "-look-for" "<interface|implementation> Prefer opening interface or implementation"
         (Marg.param "<interface|implementation>"
           (fun kind (prefix,pos,_) -> match kind with
-            | "mli" | "interface" -> (prefix,pos,`MLI)
-            | "ml"  | "implementation" -> (prefix,pos,`ML)
+            | "mli" | "mfi" | "interface" -> (prefix,pos,`MLI)
+            | "ml"  | "mf" | "implementation" -> (prefix,pos,`ML)
             | str ->
               failwithf "expecting interface or implementation, got %S." str));
     ]

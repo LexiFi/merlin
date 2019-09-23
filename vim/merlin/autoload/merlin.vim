@@ -117,13 +117,13 @@ endfunction
 
 function! merlin#MLList(ArgLead, CmdLine, CursorPos)
   let l:files = []
-  MerlinPy merlin.vim_which_ext([".ml",".mli"], "l:files")
+  MerlinPy merlin.vim_which_ext([".mf",".ml",".mfi",".mli"], "l:files")
   return join(l:files, "\n")
 endfunction
 
 function! merlin#MLIList(ArgLead, CmdLine, CursorPos)
   let l:files = []
-  MerlinPy merlin.vim_which_ext([".mli",".ml"], "l:files")
+  MerlinPy merlin.vim_which_ext([".mfi",".mli",".mf",".ml"], "l:files")
   return join(l:files, "\n")
 endfunction
 
