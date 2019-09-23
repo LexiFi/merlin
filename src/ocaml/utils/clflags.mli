@@ -18,6 +18,8 @@ val unsafe_string        : bool ref
 val nopervasives         : bool ref
 val strict_formats       : bool ref
 val open_modules         : string list ref
+val strict_props         : bool ref
+val pure_caml            : bool ref
 
 (** {1 Dummy values}
     Ignored by merlin but kept for compatibility with upstream code. *)

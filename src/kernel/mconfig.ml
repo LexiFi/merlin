@@ -378,7 +378,7 @@ let ocaml_ignored_flags = [
   "-no-unbox-specialised-args"; "-O2"; "-O3"; "-Oclassic"; "-opaque";
   "-output-complete-obj"; "-output-obj"; "-p"; "-pack";
   "-remove-unused-arguments"; "-S"; "-shared"; "-unbox-closures"; "-v";
-  "-verbose"; "-where";
+  "-verbose"; "-where"; "-strict-deps";
 ]
 
 let ocaml_ignored_parametrized_flags = [
@@ -560,7 +560,7 @@ let initial = {
     cmi_path    = [];
     cmt_path    = [];
     extensions  = [];
-    suffixes    = [(".ml", ".mli"); (".re", ".rei")];
+    suffixes    = [(".ml", ".mli"); (".mf", ".mfi"); (".re", ".rei")];
     stdlib      = None;
     reader      = [];
     protocol    = `Json;
