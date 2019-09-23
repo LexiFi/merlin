@@ -64,6 +64,10 @@ let compatible_prefix result_items tree_items =
   aux [] (result_items, tree_items)
 
 let rec type_structure caught env = function
+  | {Parsetree.pstr_desc=Pstr_extension(({txt="sig"|"lexifi.sig";_}, PSig sg), _);_} :: srem ->
+    let open Ast_helper in
+    let i = Incl.mk (Mod.constraint_ (Mod.structure srem) (Mty.signature sg)) in
+    type_structure caught env [ Str.include_ i ]
   | parsetree_item :: rest ->
     let items, _, part_env =
       Typemod.merlin_type_structure env [parsetree_item]
