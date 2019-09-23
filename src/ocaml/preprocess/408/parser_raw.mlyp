@@ -3396,7 +3396,8 @@ alias_type:
     )
     { $1 }
   | ty = alias_type PLUS LBRACKET props = with_propss RBRACKET
-    { Typ.attr ty (attribute_of_type_props props) }
+    { Location.deprecated_syntax (make_loc ($startpos($2), $endpos($5))) "use `[@t ...]' instead.";
+      Typ.attr ty (attribute_of_type_props props) }
 ;
 
 (* Function types include:
