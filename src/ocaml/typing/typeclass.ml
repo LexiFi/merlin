@@ -1269,9 +1269,12 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
                            (Printtyp.string_of_label l));
                     remaining_sargs, use_arg sarg l'
                 | None ->
+                    let has_non_labelled = List.mem_assoc Nolabel sargs in
                     sargs,
-                    if Btype.is_optional l && List.mem_assoc Nolabel sargs then
+                    if Btype.is_optional l && has_non_labelled then
                       eliminate_optional_arg ()
+                    else if has_non_labelled && not !Clflags.pure_caml && Typecore.has_implicit ty then
+                      Some (type_implicit_arg val_env scl.pcl_loc ty)
                     else
                       None
             in
@@ -1853,17 +1856,17 @@ let type_classes define_class approx kind env cls =
       cls
   in
   Ctype.begin_class_def ();
-  let (res, newenv) =
+  let (res, env) =
     List.fold_left (initial_env define_class approx) ([], env) cls
   in
-  let (res, newenv) =
-    List.fold_right (class_infos define_class kind) res ([], newenv)
+  let (res, env) =
+    List.fold_right (class_infos define_class kind) res ([], env)
   in
   Ctype.end_def ();
-  let res = List.rev_map (final_decl newenv define_class) res in
+  let res = List.rev_map (final_decl env define_class) res in
   let decls = List.fold_right extract_type_decls res [] in
   let decls =
-    try Typedecl_variance.update_class_decls newenv decls
+    try Typedecl_variance.update_class_decls env decls
     with Typedecl_variance.Error(loc, err) ->
       raise (Typedecl.Error(loc, Typedecl.Variance err))
   in

@@ -108,6 +108,8 @@ val type_let:
           Typedtree.value_binding list * Env.t
 val type_expression:
         Env.t -> Parsetree.expression -> Typedtree.expression
+val type_implicit_arg:
+  Env.t -> Location.t -> Types.type_expr -> Typedtree.expression
 val type_class_arg_pattern:
         string -> Env.t -> Env.t -> arg_label -> Parsetree.pattern ->
         Typedtree.pattern *
@@ -191,6 +193,9 @@ type error =
   | Not_a_polymorphic_variant_type of Longident.t
   | Incoherent_label_order
   | Less_general of string * Errortrace.unification_error
+  | Lazy_let_complex_pattern (* LEXIFI *)
+  | Min_max_on_bad_type of string * string (* LEXIFI *)
+  | Fields_of_on_bad_type (* LEXIFI *)
   | Modules_not_allowed
   | Cannot_infer_signature
   | Not_a_packed_module of type_expr
@@ -244,6 +249,8 @@ val type_object:
 val type_package:
   (Env.t -> Parsetree.module_expr -> Path.t -> (Longident.t * type_expr) list ->
   Typedtree.module_expr * (Longident.t * type_expr) list) ref
+
+val has_implicit: type_expr -> bool          (* LEXIFI *)
 
 val constant: Parsetree.constant -> (Asttypes.constant, error) result
 

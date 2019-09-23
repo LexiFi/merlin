@@ -995,9 +995,9 @@ let rec find_repr p1 =
   function
     Mnil ->
       None
-  | Mcons (Public, p2, ty, _, _) when Path.same p1 p2 ->
+  | Mcons (Public, p2, ty, _, rp, _) when Path.same p1 p2 && rp = !remove_props ->
       Some ty
-  | Mcons (_, _, _, _, rem) ->
+  | Mcons (_, _, _, _, _, rem) ->
       find_repr p1 rem
   | Mlink {contents = rem} ->
       find_repr p1 rem
@@ -1015,12 +1015,15 @@ let rec find_repr p1 =
 let abbreviations = ref (ref Mnil)
   (* Abbreviation memorized. *)
 
+let remove_props = Btype.remove_props
+
 (* partial: we may not wish to copy the non generic types
    before we call type_pat *)
 let rec copy ?partial ?keep_names scope ty =
   let copy = copy ?partial ?keep_names scope in
   match get_desc ty with
     Tsubst (ty, _) -> ty
+  | Tprop (_, ty) when !remove_props -> copy ty
   | desc ->
     let level = get_level ty in
     if level <> generic_level && partial = None then ty else
@@ -1166,7 +1169,7 @@ let get_new_abstract_name s =
   if index = 0 && s <> "" && s.[String.length s - 1] <> '$' then s else
   Printf.sprintf "%s%d" s index
 
-let new_local_type ?(loc = Location.none) ?manifest_and_scope () =
+let new_local_type ?(loc = Location.none) ?(type_attributes = []) ?manifest_and_scope () =
   let manifest, expansion_scope =
     match manifest_and_scope with
       None -> None, Btype.lowest_level
@@ -1183,7 +1186,7 @@ let new_local_type ?(loc = Location.none) ?manifest_and_scope () =
     type_is_newtype = true;
     type_expansion_scope = expansion_scope;
     type_loc = loc;
-    type_attributes = [];
+    type_attributes;
     type_immediate = Unknown;
     type_unboxed_default = false;
     type_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
@@ -1334,7 +1337,7 @@ let rec copy_sep ~cleanup_scope ~fixed ~free ~bound ~may_share
       match desc with
         Tarrow _ | Ttuple _ | Tvariant _ | Tconstr _ | Tobject _ | Tpackage _ ->
           (get_id ty, (t, bound)) :: visited
-      | Tvar _ | Tfield _ | Tnil | Tpoly _ | Tunivar _ ->
+      | Tvar _ | Tfield _ | Tnil | Tpoly _ | Tunivar _ | Tprop _ ->
           visited
       | Tlink _ | Tsubst _ ->
           assert false
@@ -1635,7 +1638,7 @@ let rec extract_concrete_typedecl env ty =
                 | May_have_typedecl -> May_have_typedecl
           end
       end
-  | Tpoly(ty, _) -> extract_concrete_typedecl env ty
+  | Tpoly(ty, _) | Tprop (_, ty) -> extract_concrete_typedecl env ty
   | Tarrow _ | Ttuple _ | Tobject _ | Tfield _ | Tnil
   | Tvariant _ | Tpackage _ -> Has_no_typedecl
   | Tvar _ | Tunivar _ -> May_have_typedecl
@@ -2038,7 +2041,7 @@ let reify_univars env ty =
 let rec has_cached_expansion p abbrev =
   match abbrev with
     Mnil                    -> false
-  | Mcons(_, p', _, _, rem) -> Path.same p p' || has_cached_expansion p rem
+  | Mcons(_, p', _, _, rp, rem) -> (rp = !remove_props && Path.same p p') || has_cached_expansion p rem
   | Mlink rem               -> has_cached_expansion p !rem
 
 (**** Transform error trace ****)
@@ -4033,6 +4036,17 @@ let rec eqtype rename type_pairs subst env t1 t2 =
                 (eqtype rename type_pairs subst env)
           | (Tunivar _, Tunivar _) ->
               unify_univar_for Equality t1' t2' !univar_pairs
+
+
+          | (Tprop (p1, t1), Tprop (p2, t2)) when p1 = p2 ->
+              eqtype rename type_pairs subst env t1 t2
+
+                (* Remove the next two lines to get a strict semantics
+                   for type equality with properties. *)
+          | Tprop (_p, t1), _ when not !Clflags.strict_props -> eqtype rename type_pairs subst env t1 t2
+          | _, Tprop (_p, t2) when not !Clflags.strict_props -> eqtype rename type_pairs subst env t1 t2
+
+
           | (_, _) ->
               raise_unexplained_for Equality
         end
@@ -4679,6 +4693,8 @@ let rec build_subtype env (visited : transient_expr list)
       else (t, Unchanged)
   | Tunivar _ | Tpackage _ ->
       (t, Unchanged)
+  | Tprop _ ->
+      assert false
 
 let enlarge_type env ty =
   warn := false;
@@ -4708,6 +4724,8 @@ let subtype_error ~env ~trace ~unification_trace =
   raise (Subtype (Subtype.error
                     ~trace:(expand_subtype_trace env (List.rev trace))
                     ~unification_trace))
+
+let subtypes_constrs = ref []
 
 let rec subtype_rec env trace t1 t2 cstrs =
   if eq_type t1 t2 then cstrs else

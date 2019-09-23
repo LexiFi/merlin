@@ -502,6 +502,7 @@ module Gen = struct
           List.map all_fields ~f:(fun fields ->
             let open Ast_helper in
             Exp.object_ @@ Ast_helper.Cstr.mk (Pat.any ()) fields)
+        | Tprop (_, t) -> exp_or_hole env t
         | Tfield _ | Tnil -> failwith "Found a field type outside an object"
       in
       let matching_values =

@@ -1735,9 +1735,18 @@ and transl_signature ?(keep_warnings = false) env sg =
             let sg =
               map_rec (fun rs cls ->
                 let open Typeclass in
+                let cls_obj_abbr = cls.cls_obj_abbr in
+                let cls_obj_abbr = {cls_obj_abbr with
+                                    type_attributes = {
+                                      attr_name=mknoloc "#class";
+                                      attr_payload=PStr[];
+                                      attr_loc=Location.none
+                                    } :: cls_obj_abbr.type_attributes
+                                   }
+                in
                 [Sig_class(cls.cls_id, cls.cls_decl, rs, Exported);
                  Sig_class_type(cls.cls_ty_id, cls.cls_ty_decl, rs, Exported);
-                 Sig_type(cls.cls_obj_id, cls.cls_obj_abbr, rs, Exported);
+                 Sig_type(cls.cls_obj_id, cls_obj_abbr, rs, Exported);
                  Sig_type(cls.cls_typesharp_id, cls.cls_abbr, rs, Exported)]
               ) classes [rem]
               |> List.flatten
@@ -2327,7 +2336,7 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
               let md_uid =  Uid.mk ~current_unit:(Env.get_unit_name ()) in
               let arg_md =
                 { md_type = mty.mty_type;
-                  md_attributes = [];
+                  md_attributes = [Ast_helper.Attr.mk (mknoloc "#funarg#") (PStr[])];
                   md_loc = param.loc;
                   md_uid;
                 }
@@ -2938,10 +2947,17 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
           Builtin_attributes.warning_scope sincl.pincl_attributes
             (fun () -> type_module true funct_body None env smodl)
         in
+        (* BEGIN LEXIFI *)
+        let root =
+          match modl.mod_desc with
+          | Tmod_ident (p, _) -> Typedynamic.full_name_mod env p
+          | _ -> "*INCLUDED*"
+        in
+        (* END LEXIFI *)
         let scope = Ctype.create_scope () in
         (* Rename all identifiers bound by this signature to avoid clashes *)
         let sg, shape, new_env =
-          Env.enter_signature_and_shape ~scope ~parent_shape:shape_map
+          Env.enter_signature_and_shape ~root (* LEXIFI *) ~scope ~parent_shape:shape_map
             modl_shape (extract_sig_open env smodl.pmod_loc modl.mod_type) env
         in
         let new_env = Env.update_short_paths new_env in
@@ -3196,8 +3212,13 @@ let type_implementation sourcefile outputprefix modulename initial_env ast =
           signature = simple_sg
         } (* result is ignored by Compile.implementation *)
       end else begin
+        let suffix =
+          if Filename.check_suffix sourcefile ".mf" && !Config.interface_suffix = ".mli"
+          then ".mfi"
+          else !Config.interface_suffix
+        in
         let sourceintf =
-          Filename.remove_extension sourcefile ^ !Config.interface_suffix in
+          Filename.remove_extension sourcefile ^ suffix in
         if Sys.file_exists sourceintf then begin
           let intf_file =
             try
