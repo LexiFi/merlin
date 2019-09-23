@@ -38,3 +38,6 @@ let opaque              = ref false
 let unboxed_types       = ref false
 
 let locations = ref true
+
+let strict_props        = ref true
+let pure_caml           = ref false

@@ -73,6 +73,7 @@ let rec type_structure caught env = function
     let items, _, part_env =
       Typemod.merlin_type_structure env [parsetree_item]
     in
+    Typedynamic.build_stypes items;
     let typedtree_items =
       (items.Typedtree.str_items, items.Typedtree.str_type) in
     let item = {
@@ -102,6 +103,7 @@ let rec type_signature caught env = function
   | [] -> []
 
 let type_implementation config caught parsetree =
+  let parsetree = Typedynamic.assign_global_names parsetree in (* LEXIFI *)
   let env0, snap0, stamp0, prefix = get_cache config in
   let prefix, parsetree =
     match prefix with

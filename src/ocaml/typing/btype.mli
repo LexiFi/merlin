@@ -132,6 +132,8 @@ val map_type_expr_cstr_args: (type_expr -> type_expr) ->
   (constructor_arguments -> constructor_arguments)
 
 
+val has_props: type_expr -> bool (* LEXIFI *)
+
 type type_iterators =
   { it_signature: type_iterators -> signature -> unit;
     it_signature_item: type_iterators -> signature_item -> unit;
@@ -312,3 +314,6 @@ val print_raw: (Format.formatter -> type_expr -> unit) ref
 (**** Type information getter ****)
 
 val cstr_type_path : constructor_description -> Path.t
+
+val remove_props: bool ref
+val keeping_props: (unit -> 'a) -> 'a

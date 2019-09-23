@@ -36,3 +36,6 @@ val opaque               : bool ref
 val unboxed_types        : bool ref
 
 val locations            : bool ref
+
+val strict_props         : bool ref
+val pure_caml            : bool ref

@@ -196,6 +196,7 @@ let classify_expression : Typedtree.expression -> sd =
     | Texp_extension_constructor _ ->
         Static
 
+    | Texp_typath _ -> Static
     | Texp_match _
     | Texp_ifthenelse _
     | Texp_send _
@@ -805,6 +806,8 @@ let rec expression : Typedtree.expression -> term_judg =
         | `Identifier _
         | `Float_that_cannot_be_shortcut ->
           Return
+        | `Forced _ ->
+          Return
         | `Other ->
           Delay
       in
@@ -824,6 +827,14 @@ let rec expression : Typedtree.expression -> term_judg =
     | Texp_hole -> empty
     | Texp_extension_constructor (_lid, pth) ->
       path pth << Dereference
+    | Texp_typath l ->
+      List.fold_left (fun use step ->
+            match step with
+            | Ttypath_constructor _ | Ttypath_field _ | Ttypath_tuple _ ->
+                use
+            | Ttypath_list e | Ttypath_array e ->
+                join [use; expression e << Guard]
+        ) empty l
     | Texp_open (od, e) ->
       open_declaration od >> expression e
 

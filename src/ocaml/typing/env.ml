@@ -2398,7 +2398,11 @@ let enter_module ~scope ?arg s presence mty env =
 
 (* Insertion of all components of a signature *)
 
-let add_item (map, mod_shape) comp env =
+let root_attr s =
+  [Ast_helper.Attr.mk (Location.mknoloc "#root#")
+     (Parsetree.PTyp (Ast_helper.Typ.var s))]
+
+let add_item ?root (map, mod_shape) comp env =
   let proj_shape item =
     match mod_shape with
     | None -> map, None
@@ -2411,12 +2415,22 @@ let add_item (map, mod_shape) comp env =
       let map, shape = proj_shape (Shape.Item.value id) in
       map, add_value ?shape id decl env
   | Sig_type(id, decl, _, _) ->
+      let decl =
+        match root with
+        | None -> decl
+        | Some root -> {decl with type_attributes = decl.type_attributes @ root_attr root}
+      in
       let map, shape = proj_shape (Shape.Item.type_ id) in
       map, add_type ~check:false ~predef:false ?shape id decl env
   | Sig_typext(id, ext, _, _) ->
       let map, shape = proj_shape (Shape.Item.extension_constructor id) in
       map, add_extension ~check:false ?shape ~rebind:false id ext env
   | Sig_module(id, presence, md, _, _) ->
+      let md =
+        match root with
+        | None -> md
+        | Some root -> {md with md_attributes = md.md_attributes @ root_attr root}
+      in
       let map, shape = proj_shape (Shape.Item.module_ id) in
       map, add_module_declaration ~check:false ?shape id presence md env
   | Sig_modtype(id, decl, _)  ->
@@ -2429,16 +2443,16 @@ let add_item (map, mod_shape) comp env =
       let map, shape = proj_shape (Shape.Item.class_type id) in
       map, add_cltype ?shape id decl env
 
-let rec add_signature (map, mod_shape) sg env =
+let rec add_signature ?root (map, mod_shape) sg env =
   match sg with
       [] -> map, env
   | comp :: rem ->
-      let map, env = add_item (map, mod_shape) comp env in
-      add_signature (map, mod_shape) rem env
+      let map, env = add_item ?root (map, mod_shape) comp env in
+      add_signature ?root (map, mod_shape) rem env
 
-let enter_signature_and_shape ~scope ~parent_shape mod_shape sg env =
+let enter_signature_and_shape ?root ~scope ~parent_shape mod_shape sg env =
   let sg = Subst.signature (Rescope scope) Subst.identity sg in
-  let shape, env = add_signature (parent_shape, mod_shape) sg env in
+  let shape, env = add_signature ?root (parent_shape, mod_shape) sg env in
   sg, shape, env
 
 let enter_signature ?mod_shape ~scope sg env =
@@ -2448,8 +2462,8 @@ let enter_signature ?mod_shape ~scope sg env =
   in
   sg, env
 
-let enter_signature_and_shape ~scope ~parent_shape mod_shape sg env =
-  enter_signature_and_shape ~scope ~parent_shape (Some mod_shape) sg env
+let enter_signature_and_shape ?root ~scope ~parent_shape mod_shape sg env =
+  enter_signature_and_shape ?root ~scope ~parent_shape (Some mod_shape) sg env
 
 let add_value = add_value ?shape:None
 let add_type = add_type ?shape:None
@@ -2710,6 +2724,12 @@ let (initial_safe_string, initial_unsafe_string) =
 
 let add_type ~check id info env =
   add_type ~check ~predef:false id info env
+
+let initial_with_auto_fwd = ref (fun () -> assert false)
+
+let initial_with_auto =
+  let env = Lazy.from_fun (fun () -> !initial_with_auto_fwd ()) in
+  fun () -> Lazy.force env
 
 (* Tracking usage *)
 
@@ -3296,13 +3316,13 @@ let find_module_by_name lid env =
   let loc = Location.(in_file !input_name) in
   lookup_module ~errors:false ~use:false ~loc lid env
 
-let find_value_by_name lid env =
+let find_value_by_name ?(use = false) lid env =
   let loc = Location.(in_file !input_name) in
-  lookup_value ~errors:false ~use:false ~loc lid env
+  lookup_value ~errors:false ~use ~loc lid env
 
-let find_type_by_name lid env =
+let find_type_by_name ?(use = false) lid env =
   let loc = Location.(in_file !input_name) in
-  lookup_type ~errors:false ~use:false ~loc lid env
+  lookup_type ~errors:false ~use ~loc lid env
 
 let find_modtype_by_name lid env =
   let loc = Location.(in_file !input_name) in
@@ -3629,6 +3649,11 @@ let env_of_only_summary env_from_summary env =
     local_constraints = env.local_constraints;
     flags = env.flags;
   }
+
+
+let store_value id decl env =
+  let addr = value_declaration_address env id decl in
+  store_value ?check:None id addr decl (Shape.leaf decl.val_uid) env
 
 (* Error report *)
 
