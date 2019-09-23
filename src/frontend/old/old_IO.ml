@@ -70,8 +70,8 @@ let source_or_build = function
   | _ -> invalid_arguments ()
 
 let ml_or_mli = function
-  | "ml" -> `ML
-  | "mli"  -> `MLI
+  | "ml" | "mf" -> `ML
+  | "mli" | "mfi" -> `MLI
   | _ -> invalid_arguments ()
 
 let auto_ml_or_mli = function
