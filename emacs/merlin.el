@@ -141,7 +141,7 @@ See `merlin-debug'."
   "The OCaml mode to use for the *merlin-types* buffer."
   :group 'merlin :type 'symbol)
 
-(defcustom merlin-error-after-save '("ml" "mli")
+(defcustom merlin-error-after-save '("mf" "mfi" "ml" "mli")
   "Determines whether merlin should check for errors after saving.
 If t, always check for errors after saving.
 If nil, never check.
@@ -622,15 +622,15 @@ argument (lookup appropriate binary, setup logging, pass global settings)"
   "Switch to the ML file corresponding to the module NAME
 (fallback to MLI if no ML is provided)."
   (interactive (list (ido-completing-read "Module: "
-                                          (merlin-switch-list-by-ext '(".ml" ".mli")))))
-  (merlin-switch-to name '(".ml" ".mli")))
+                                          (merlin-switch-list-by-ext '(".mf" ".ml" ".mfi" ".mli")))))
+  (merlin-switch-to name '(".mf" ".ml" ".mfi" ".mli")))
 
 (defun merlin-switch-to-mli (name)
   "Switch to the MLI file corresponding to the module NAME
 (fallback to ML if no MLI is provided)."
   (interactive (list (ido-completing-read "Module: "
-                                          (merlin-switch-list-by-ext '(".mli" ".ml")))))
-  (merlin-switch-to name '(".mli" ".ml")))
+                                          (merlin-switch-list-by-ext '(".mfi" ".mli" ".mf" ".ml")))))
+  (merlin-switch-to name '(".mfi" ".mli" ".mf" ".ml")))
 
 ;;;;;;;;;;;;;;;;;;
 ;; ERROR BUFFER ;;
