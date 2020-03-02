@@ -31,6 +31,7 @@ type record_mismatch =
   | Label_names of int * Ident.t * Ident.t
   | Label_missing of position * Ident.t
   | Unboxed_float_representation of position
+  | Label_properties of Ident.t
 
 type constructor_mismatch =
   | Type
@@ -45,6 +46,7 @@ type variant_mismatch =
                             * constructor_mismatch
   | Constructor_names of int * Ident.t * Ident.t
   | Constructor_missing of position * Ident.t
+  | Constructor_properties of Ident.t
 
 type extension_constructor_mismatch =
   | Constructor_privacy
@@ -64,6 +66,7 @@ type type_mismatch =
   | Variant_mismatch of variant_mismatch
   | Unboxed_representation of position
   | Immediate of Type_immediacy.Violation.t
+  | Type_properties
 
 val value_descriptions:
   loc:Location.t -> Env.t -> string ->

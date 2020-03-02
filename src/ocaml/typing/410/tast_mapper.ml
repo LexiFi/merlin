@@ -131,6 +131,8 @@ let structure_item sub {str_desc; str_loc; str_env} =
           (List.map (tuple3 id id (sub.class_type_declaration sub)) list)
     | Tstr_include incl ->
         Tstr_include (include_infos (sub.module_expr sub) incl)
+    | Tstr_usettype e ->
+        Tstr_usettype (sub.expr sub e)
     | Tstr_open od -> Tstr_open (sub.open_declaration sub od)
     | Tstr_attribute _ as d -> d
   in
@@ -357,6 +359,15 @@ let expr sub x =
         Texp_object (sub.class_structure sub cl, sl)
     | Texp_pack mexpr ->
         Texp_pack (sub.module_expr sub mexpr)
+    | Texp_typath l ->
+        let aux = function
+          | Ttypath_constructor _
+          | Ttypath_field _
+          | Ttypath_tuple _ as x -> x
+          | Ttypath_list e -> Ttypath_list (sub.expr sub e)
+          | Ttypath_array e -> Ttypath_array (sub.expr sub e)
+        in
+        Texp_typath (List.map aux l)
     | Texp_letop {let_; ands; param; body; partial} ->
         Texp_letop{
           let_ = sub.binding_op sub let_;

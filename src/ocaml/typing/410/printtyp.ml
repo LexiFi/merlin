@@ -468,7 +468,7 @@ let rec safe_repr v = function
 
 let rec list_of_memo = function
     Mnil -> []
-  | Mcons (_priv, p, _t1, _t2, rem) -> p :: list_of_memo rem
+  | Mcons (_priv, p, _t1, _t2, _, rem) -> p :: list_of_memo rem
   | Mlink rem -> list_of_memo !rem
 
 let print_name ppf = function
@@ -537,6 +537,9 @@ and raw_type_desc ppf = function
   | Tpackage (p, _, tl) ->
       fprintf ppf "@[<hov1>Tpackage(@,%a@,%a)@]" path p
         raw_type_list tl
+  | Tprop (_, ty) ->
+      fprintf ppf "@[<hov1>Tprop(@,_@,%a)@]"
+        raw_type ty
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"
 | Some Types.Fixed_private -> fprintf ppf "Some Fixed_private"
@@ -804,6 +807,7 @@ let rec mark_loops_rec visited ty =
         List.iter (fun t -> add_alias t) tyl;
         mark_loops_rec visited ty
     | Tunivar _ -> add_named_var ty
+    | Tprop (_, ty) -> mark_loops_rec visited ty
 
 let mark_loops ty =
   normalize_type Env.empty ty;
@@ -941,6 +945,10 @@ let rec tree_of_typexp sch ty =
         let n =
           List.map (fun li -> String.concat "." (Longident.flatten li)) n in
         Otyp_module (tree_of_path Module_type p, n, tree_of_typlist sch tyl)
+    | Tprop (props, ty) ->
+        Otyp_attribute
+          (tree_of_typexp sch ty,
+           {oattr_name=String.concat "," (List.map fst props)})
   in
   if List.memq px !delayed then delayed := List.filter ((!=) px) !delayed;
   if is_aliased px && aliasable ty then begin
@@ -1291,6 +1299,13 @@ let tree_of_value_description id decl =
     | Val_prim p -> Primitive.print p vd
     | _ -> vd
   in
+  (* BEGIN LEXIFI *)
+  let vd =
+    match Types.val_approx decl with
+    | Some s -> {vd with oval_prims = [ Printf.sprintf "=%s" s ]}
+    | None -> vd
+  in
+  (* END LEXIFI *)
   Osig_value vd
 
 let value_description id ppf decl =
@@ -2087,6 +2102,9 @@ let report_ambiguous_type_error ppf env tp0 tpl txt1 txt2 txt3 =
            @]"
           txt2 type_path_list (List.map trees_of_type_path_expansion tpl)
           txt3 type_path_expansion tp0)
+
+let () =
+  Btype.print_raw_type_expr := raw_type_expr
 
 (* Adapt functions to exposed interface *)
 let tree_of_path = tree_of_path Other
