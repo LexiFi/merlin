@@ -1146,9 +1146,12 @@ and class_expr_aux cl_num val_env met_env scl =
                            (Printtyp.string_of_label l));
                     remaining_sargs, use_arg sarg l'
                 | None ->
+                    let has_non_labelled = List.mem_assoc Nolabel sargs in
                     sargs,
-                    if Btype.is_optional l && List.mem_assoc Nolabel sargs then
+                    if Btype.is_optional l && has_non_labelled then
                       eliminate_optional_arg ()
+                    else if has_non_labelled && not !Clflags.pure_caml && Typecore.has_implicit ty then
+                      Some (type_implicit_arg val_env scl.pcl_loc ty)
                     else
                       None
             in

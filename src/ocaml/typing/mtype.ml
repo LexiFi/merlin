@@ -232,6 +232,9 @@ and nondep_modtype_decl env ids mtd =
 let nondep_supertype env ids = nondep_mty env Co ids
 let nondep_sig_item env ids = nondep_sig_item env Co ids
 
+let nondep_supertype env ids mty =
+  Btype.keeping_props (fun () -> nondep_supertype env ids mty)
+
 let enrich_typedecl env p id decl =
   match decl.type_manifest with
     Some _ -> decl

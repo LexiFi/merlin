@@ -30,7 +30,7 @@ let flambda = false
 
 let exec_magic_number = "Caml1999X030"
     (* exec_magic_number is duplicated in runtime/caml/exec.h *)
-and cmi_magic_number = "Caml1999I030"
+and cmi_magic_number = "Mlfi1999I030"
 and cmo_magic_number = "Caml1999O030"
 and cma_magic_number = "Caml1999A030"
 and cmx_magic_number =
@@ -46,7 +46,7 @@ and cmxa_magic_number =
 and ast_impl_magic_number = "Caml1999M030"
 and ast_intf_magic_number = "Caml1999N030"
 and cmxs_magic_number = "Caml1999D030"
-and cmt_magic_number = "Caml1999T030"
+and cmt_magic_number = "Mlfi1999T030"
 and linear_magic_number = "Caml1999L030"
 
 let interface_suffix = ref ".mli"

@@ -44,6 +44,9 @@ let fresh_env () =
     ~initially_opened_module
     ~open_implicit_modules:(List.rev !Clflags.open_modules)
 
+let () =
+  Env.initial_with_auto_fwd := fresh_env
+
 module Rewrite_loc = struct
   let queue = ref []
 

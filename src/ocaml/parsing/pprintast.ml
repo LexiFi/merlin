@@ -1746,6 +1746,10 @@ let prepare_error err =
         "broken invariant in parsetree: %s" s
   | Invalid_package_type (loc, s) ->
       Location.errorf ~source ~loc "invalid package type: %s" s
+  | Illegal_date_format loc ->
+      Location.errorf ~loc "illegal date format, must be YYYY_MM_DD[.HHMM]T"
+  | Illegal_date_value loc ->
+      Location.errorf ~loc "invalid date value"
 
 let () =
   Location.register_error_of_exn

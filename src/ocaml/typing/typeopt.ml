@@ -70,7 +70,7 @@ let classify env ty =
   let ty = scrape_ty env ty in
   if not (Ctype.maybe_pointer_type env ty) then Int
   else match ty.desc with
-  | Tvar _ | Tunivar _ ->
+  | Tvar _ | Tunivar _ | Tprop _ ->
       Any
   | Tconstr (p, _args, _abbrev) ->
       if Path.same p Predef.path_float then Float
@@ -114,6 +114,13 @@ let lazy_val_requires_forward env ty =
   | Float -> false (* TODO: Config.flat_float_array *)
   | Addr | Int -> false
 
+(* Can simplify "lazy (Lazy.force e)" into "e" ?   Note that e has necessarily type _ Lazy.t. *)
+let rec can_simplify_lazy e =
+  match e.exp_desc with
+  | Texp_ident _ | Texp_lazy _ -> true
+  | Texp_field (e, _, lab) -> lab.lbl_mut = Immutable && can_simplify_lazy e
+  | _ -> false
+
 (** The compilation of the expression [lazy e] depends on the form of e:
     constants, floats and identifiers are optimized.  The optimization must be
     taken into account when determining whether a recursive binding is safe. *)
@@ -121,6 +128,7 @@ let classify_lazy_argument : Typedtree.expression ->
                              [`Constant_or_function
                              |`Float_that_cannot_be_shortcut
                              |`Identifier of [`Forward_value|`Other]
+                             |`Forced of Typedtree.expression
                              |`Other] =
   fun e -> match e.exp_desc with
     | Texp_constant
@@ -137,5 +145,7 @@ let classify_lazy_argument : Typedtree.expression ->
        `Identifier `Forward_value
     | Texp_ident _ ->
        `Identifier `Other
+    | Texp_apply ({exp_desc=Texp_ident(_,_,{val_kind=Val_prim{Primitive.prim_name="%lazy_force"}})}, [_, Some e]) when can_simplify_lazy e -> (* LEXIFI FIXME *)
+       `Forced e
     | _ ->
        `Other

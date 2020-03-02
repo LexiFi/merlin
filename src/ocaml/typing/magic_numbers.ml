@@ -17,10 +17,10 @@ module Cmi = struct
     | "Caml1999I024" -> Some "4.07.1"
     | "Caml1999I025" -> Some "4.08"
     | "Caml1999I026" -> Some "4.09"
-    | "Caml1999I027" -> Some "4.10"
+    | "Caml1999I027" | "Mlfi1999I027" -> Some "4.10"
     | "Caml1999I028" -> Some "4.11"
     | "Caml1999I029" -> Some "4.12"
-    | "Caml1999I030" -> Some "4.13"
+    | "Caml1999I030" | "Mlfi1999I030" -> Some "4.13"
     | _ -> None
 
   open Format
