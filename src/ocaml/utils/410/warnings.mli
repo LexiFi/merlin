@@ -20,6 +20,9 @@ type loc = {
 }
 
 type t =
+  | Property_change of string * loc * loc   (* 104 *) (* Q *)
+  | Bad_witness_for_abstract_type of string (* 108 *)
+  | Not_a_global_type of string             (* 110 *)
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
 (*| Deprecated --> alert "deprecated" *)    (*  3 *)

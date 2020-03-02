@@ -113,6 +113,7 @@ and expression_desc =
   | Texp_lazy of expression
   | Texp_object of class_structure * string list
   | Texp_pack of module_expr
+  | Texp_typath of typath_step list (* LEXIFI *)
   | Texp_letop of {
       let_ : binding_op;
       ands : binding_op list;
@@ -123,6 +124,13 @@ and expression_desc =
   | Texp_unreachable
   | Texp_extension_constructor of Longident.t loc * Path.t
   | Texp_open of open_declaration * expression
+
+and typath_step =
+  | Ttypath_constructor of Longident.t loc * int
+  | Ttypath_field of Longident.t loc
+  | Ttypath_tuple of int * int
+  | Ttypath_list of expression
+  | Ttypath_array of expression
 
 and meth =
     Tmeth_name of string
@@ -258,6 +266,7 @@ and structure_item_desc =
   | Tstr_class_type of (Ident.t * string loc * class_type_declaration) list
   | Tstr_include of include_declaration
   | Tstr_attribute of attribute
+  | Tstr_usettype of expression
 
 and module_binding =
     {
