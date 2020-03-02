@@ -1174,7 +1174,7 @@ and transl_modtype_aux env smty =
               let id, newenv =
                 let arg_md =
                   { md_type = arg.mty_type;
-                    md_attributes = [];
+                    md_attributes = [Ast_helper.Attr.mk (mknoloc "#funarg#") (PStr[])];
                     md_loc = param.loc;
                     md_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
                   }
@@ -2523,9 +2523,18 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
           (map_rec
             (fun rs cls ->
               let open Typeclass in
+              let cls_obj_abbr = cls.cls_obj_abbr in
+              let cls_obj_abbr = {cls_obj_abbr with
+                                  type_attributes = {
+                                    attr_name=mknoloc "#class";
+                                    attr_payload=PStr[];
+                                    attr_loc=Location.none
+                                  } :: cls_obj_abbr.type_attributes
+                                 }
+              in
               [Sig_class(cls.cls_id, cls.cls_decl, rs, Exported);
                Sig_class_type(cls.cls_ty_id, cls.cls_ty_decl, rs, Exported);
-               Sig_type(cls.cls_obj_id, cls.cls_obj_abbr, rs, Exported);
+               Sig_type(cls.cls_obj_id, cls_obj_abbr, rs, Exported);
                Sig_type(cls.cls_typesharp_id, cls.cls_abbr, rs, Exported)])
              classes []),
         new_env
@@ -2573,6 +2582,14 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
             (extract_sig_open env smodl.pmod_loc modl.mod_type) env in
         let new_env = Env.update_short_paths new_env in
         List.iter (Signature_names.check_sig_item names loc) sg;
+        (* BEGIN LEXIFI *)
+        let root =
+          match modl.mod_desc with
+          | Tmod_ident (p, _) -> Typecore.full_name_mod env p
+          | _ -> "*INCLUDED*"
+        in
+        let new_env = Env.add_signature_include root sg new_env in (* LEXIFI *)
+        (* END LEXIFI *)
         let incl =
           { incl_mod = modl;
             incl_type = sg;
@@ -2581,6 +2598,22 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
           }
         in
         Tstr_include incl, sg, new_env
+(* BEGIN LEXIFI *)
+    | Pstr_extension (({txt="t"|"lexifi.t"},
+                       PStr [{pstr_desc =
+                                Pstr_value (Nonrecursive,
+                                            [{pvb_pat = {ppat_desc = Ppat_any | Ppat_constraint ({ppat_desc = Ppat_any}, _) as ppat_desc}; pvb_expr}])}]), _) ->
+        let open Ast_helper in
+        let t =
+          match ppat_desc with
+          | Ppat_any -> Typ.any ()
+          | Ppat_constraint ({ppat_desc = Ppat_any}, t) -> t
+          | _ -> assert false
+        in
+        let t = Typ.constr (mknoloc (Longident.parse "Mlfi_types.ttype")) [t] in
+        let expr = Typecore.type_expression env (Exp.constraint_ pvb_expr t) in
+        Tstr_usettype expr, [], env
+(* END LEXIFI *)
     | Pstr_extension (ext, _attrs) ->
         raise (Error_forward (Builtin_attributes.error_of_extension ext))
     | Pstr_attribute x ->
@@ -2788,10 +2821,44 @@ let () =
   Typeclass.type_open_descr := type_open_descr;
   type_module_type_of_fwd := type_module_type_of
 
+(* BEGIN LEXIFI *)
+(* Compute a global name for module bindings and type declarations *)
+let root_attr s =
+  [Ast_helper.Attr.mk (Location.mknoloc "#root#")
+     (Parsetree.PTyp (Ast_helper.Typ.var s))]
+
+let assign_global_names unit =
+  let open Ast_mapper in
+  let rec mapper path =
+    let super = default_mapper in
+    let module_binding _m pmb =
+      let m = mapper (path ^ "." ^ Option.value ~default:"_" pmb.pmb_name.txt) in
+      let pmb = super.module_binding m pmb in
+      {pmb with pmb_attributes = pmb.pmb_attributes @ root_attr path}
+    in
+    let type_declaration _m td =
+      {td with ptype_attributes = td.ptype_attributes @ root_attr path}
+    in
+    let expr m e =
+      match e.pexp_desc with
+      | Pexp_letmodule ({txt}, _me, _expr) ->
+          let m = mapper ("*LOCAL*." ^ Option.value ~default:"_" txt) in
+          super.expr m e
+      | _ ->
+          super.expr m e
+    in
+    {super with module_binding; type_declaration; expr}
+  in
+  mapper unit
+(* END LEXIFI *)
 
 (* Typecheck an implementation file *)
 
 let type_implementation sourcefile outputprefix modulename initial_env ast =
+  let ast =
+    let map = assign_global_names (Env.get_unit_name ()) in
+    map.Ast_mapper.structure map ast
+  in
   Cmt_format.clear ();
   Misc.try_finally (fun () ->
       Typecore.reset_delayed_checks ();
@@ -2809,8 +2876,13 @@ let type_implementation sourcefile outputprefix modulename initial_env ast =
           );
         (str, Tcoerce_none)   (* result is ignored by Compile.implementation *)
       end else begin
+        let suffix =
+          if Filename.check_suffix sourcefile ".mf" && !Config.interface_suffix = ".mli"
+          then ".mfi"
+          else !Config.interface_suffix
+        in
         let sourceintf =
-          Filename.remove_extension sourcefile ^ !Config.interface_suffix in
+          Filename.remove_extension sourcefile ^ suffix in
         if Sys.file_exists sourceintf then begin
           let intf_file =
             try

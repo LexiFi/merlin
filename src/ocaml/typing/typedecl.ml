@@ -65,6 +65,7 @@ type error =
   | Bad_unboxed_attribute of string
   | Boxed_and_unboxed
   | Nonrec_gadt
+  | Type_properties_under_phantom_type of Ident.t
 
 open Typedtree
 
@@ -143,9 +144,10 @@ let get_unboxed_type_representation env ty =
   | _ -> None
 
 (* Determine if a type's values are represented by floats at run-time. *)
-let is_float env ty =
+let rec is_float env ty =
   match get_unboxed_type_representation env ty with
     Some {desc = Tconstr(p, _, _); _} -> Path.same p Predef.path_float
+  | Some {desc = Tprop (_, ty)} -> is_float env ty
   | _ -> false
 
 (* Determine if a type definition defines a fixed type. (PW) *)
@@ -214,7 +216,8 @@ let transl_labels env closed lbls =
     Builtin_attributes.warning_scope attrs
       (fun () ->
          let arg = Ast_helper.Typ.force_poly arg in
-         let cty = transl_simple_type env closed arg in
+         let cty = transl_simple_type_with_props env closed arg in
+         let attrs = props_attributes env attrs in
          {ld_id = Ident.create_local name.txt;
           ld_name = name; ld_mutable = mut;
           ld_type = cty; ld_loc = loc; ld_attributes = attrs}
@@ -239,7 +242,7 @@ let transl_labels env closed lbls =
 
 let transl_constructor_arguments env closed = function
   | Pcstr_tuple l ->
-      let l = List.map (transl_simple_type env closed) l in
+      let l = List.map (transl_simple_type_with_props env closed) l in
       Types.Cstr_tuple (List.map (fun t -> t.ctyp_type) l),
       Cstr_tuple l
   | Pcstr_record l ->
@@ -262,7 +265,7 @@ let make_constructor env type_path type_params sargs sret_type =
       let args, targs =
         transl_constructor_arguments env false sargs
       in
-      let tret_type = transl_simple_type env false sret_type in
+      let tret_type = transl_simple_type_with_props env false sret_type in
       let ret_type = tret_type.ctyp_type in
       (* TODO add back type_path as a parameter ? *)
       begin match (Ctype.repr ret_type).desc with
@@ -354,20 +357,21 @@ let transl_declaration env sdecl (id, uid) =
             make_constructor env (Path.Pident id) params
                              scstr.pcd_args scstr.pcd_res
           in
+          let attrs = props_attributes env scstr.pcd_attributes in
           let tcstr =
             { cd_id = name;
               cd_name = scstr.pcd_name;
               cd_args = targs;
               cd_res = tret_type;
               cd_loc = scstr.pcd_loc;
-              cd_attributes = scstr.pcd_attributes }
+              cd_attributes = attrs }
           in
           let cstr =
             { Types.cd_id = name;
               cd_args = args;
               cd_res = ret_type;
               cd_loc = scstr.pcd_loc;
-              cd_attributes = scstr.pcd_attributes;
+              cd_attributes = attrs;
               cd_uid = Uid.mk ~current_unit:(Env.get_unit_name ()) }
           in
             tcstr, cstr
@@ -393,10 +397,11 @@ let transl_declaration env sdecl (id, uid) =
         None -> None, None
       | Some sty ->
         let no_row = not (is_fixed_type sdecl) in
-        let cty = transl_simple_type env no_row sty in
+        let cty = transl_simple_type_with_props env no_row sty in
         Some cty, Some cty.ctyp_type
     in
     let arity = List.length params in
+    let type_attributes = props_attributes env sdecl.ptype_attributes in
     let decl =
       { type_params = params;
         type_arity = arity;
@@ -408,7 +413,7 @@ let transl_declaration env sdecl (id, uid) =
         type_is_newtype = false;
         type_expansion_scope = Btype.lowest_level;
         type_loc = sdecl.ptype_loc;
-        type_attributes = sdecl.ptype_attributes;
+        type_attributes;
         type_immediate = Unknown;
         type_unboxed = unboxed_status;
         type_uid = uid;
@@ -448,7 +453,7 @@ let transl_declaration env sdecl (id, uid) =
       typ_manifest = tman;
       typ_kind = tkind;
       typ_private = sdecl.ptype_private;
-      typ_attributes = sdecl.ptype_attributes;
+      typ_attributes = type_attributes;
     }
 
 (* Generalize a type declaration *)
@@ -935,6 +940,14 @@ let transl_type_decl env rec_flag sdecl_list =
     | Typedecl_separability.Error (loc, err) ->
         raise (Error (loc, Separability err))
   in
+  (* BEGIN LEXIFI *)
+  List.iter (function
+    | (id, {type_manifest = Some te; type_variance; type_loc; _})
+      when List.exists (fun var -> Variance.null = var) type_variance && Btype.has_props te ->
+        raise (Error (type_loc, Type_properties_under_phantom_type id))
+    | _ -> ()
+    ) decls;
+  (* END LEXIFI *)
   (* Compute the final environment with variance and immediacy *)
   let final_env = add_types_to_env decls env in
   (* Check re-exportation *)
@@ -1333,8 +1346,20 @@ let transl_value_decl env loc valdecl =
   let v =
   match valdecl.pval_prim with
     [] when Env.is_in_signature env ->
+      let approx =
+        try Some (List.find (function {attr_name = {txt = "val"|"lexifi.val"; _}; _} -> true | _ -> false) valdecl.pval_type.ptyp_attributes)
+        with Not_found -> None
+      in
+      let approx =
+        match approx with
+        | None -> []
+        | Some {attr_payload = PStr[{pstr_desc=Pstr_eval (e, _)}]; _} ->
+            [Types.approx_attr (really_approx_expr env e)]
+        | Some _ ->
+            assert false
+      in
       { val_type = ty; val_kind = Val_reg; Types.val_loc = loc;
-        val_attributes = valdecl.pval_attributes;
+        val_attributes = approx @ valdecl.pval_attributes;
         val_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
       }
   | [] ->
@@ -1874,6 +1899,9 @@ let report_error ppf = function
   | Nonrec_gadt ->
       fprintf ppf
         "@[GADT case syntax cannot be used in a 'nonrec' block.@]"
+  | Type_properties_under_phantom_type id ->
+      fprintf ppf
+        "@[Type properties under phantom type `%s' not supported.@]" (Ident.name id)
 
 let () =
   Location.register_error_of_exn

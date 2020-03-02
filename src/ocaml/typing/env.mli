@@ -55,6 +55,8 @@ type t
 val empty: t
 val initial_safe_string: t
 val initial_unsafe_string: t
+val initial_with_auto_fwd: (unit -> t) ref
+val initial_with_auto: unit -> t (* LEXIFI *)
 val diff: t -> t -> Ident.t list
 val copy_local: from:t -> t -> t
 
@@ -295,6 +297,8 @@ val persistent_structures_of_dir : Load_path.Dir.t -> Misc.String.Set.t
    [false]. *)
 val filter_non_loaded_persistent : (Ident.t -> bool) -> t -> t
 
+val add_signature_include: string -> signature -> t -> t (* LEXIFI *)
+
 (* Insertion of all fields of a signature. *)
 
 val add_item: signature_item -> t -> t
@@ -419,6 +423,8 @@ val set_value_used_callback:
     value_description -> (unit -> unit) -> unit
 val set_type_used_callback:
     type_declaration -> ((unit -> unit) -> unit) -> unit
+
+val store_value: Ident.t -> value_description -> t -> t (* LEXIFI *)
 
 (* Forward declaration to break mutual recursion with Includemod. *)
 val check_functor_application:

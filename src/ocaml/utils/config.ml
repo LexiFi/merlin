@@ -29,7 +29,7 @@ let version = Sys.ocaml_version
 let flambda = false
 
 let exec_magic_number = "Caml1999X029"
-and cmi_magic_number = "Caml1999I029"
+and cmi_magic_number = "Mlfi1999I029"
 and cmo_magic_number = "Caml1999O029"
 and cma_magic_number = "Caml1999A029"
 and cmx_magic_number =
@@ -46,7 +46,7 @@ and ast_impl_magic_number = "Caml1999M029"
 and ast_intf_magic_number = "Caml1999N029"
 and cmxs_magic_number = "Caml1999D029"
     (* cmxs_magic_number is duplicated in otherlibs/dynlink/natdynlink.ml *)
-and cmt_magic_number = "Caml1999T029"
+and cmt_magic_number = "Mlfi1999T029"
 
 let interface_suffix = ref ".mli"
 

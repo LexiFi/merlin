@@ -100,6 +100,7 @@ type error =
   | Bad_unboxed_attribute of string
   | Boxed_and_unboxed
   | Nonrec_gadt
+  | Type_properties_under_phantom_type of Ident.t
 
 exception Error of Location.t * error
 
