@@ -124,6 +124,8 @@ let compute_variance env visited vari ty =
           Variance.(if mem Pos vari || mem Neg vari then full else unknown)
         in
         List.iter (compute_variance_rec v) tyl
+    | Tprop (_, ty) ->
+        compute_same ty
   in
   compute_variance_rec vari ty
 

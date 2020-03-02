@@ -111,6 +111,8 @@ val fold_row: ('a -> type_expr -> 'a) -> 'a -> row_desc -> 'a
 val iter_abbrev: (type_expr -> unit) -> abbrev_memo -> unit
         (* Iteration on types in an abbreviation list *)
 
+val has_props: type_expr -> bool (* LEXIFI *)
+
 type type_iterators =
   { it_signature: type_iterators -> signature -> unit;
     it_signature_item: type_iterators -> signature_item -> unit;
@@ -253,6 +255,11 @@ val iter_type_expr_cstr_args: (type_expr -> unit) ->
   (constructor_arguments -> unit)
 val map_type_expr_cstr_args: (type_expr -> type_expr) ->
   (constructor_arguments -> constructor_arguments)
+
+val print_raw_type_expr: (Format.formatter -> type_expr -> unit) ref
+
+val remove_props: bool ref
+val keeping_props: (unit -> 'a) -> 'a
 
 (** merlin: check if a snapshot has been invalidated *)
 val is_valid: snapshot -> bool

@@ -27,6 +27,10 @@ exception Dont_match
 let value_descriptions ~loc env name
     (vd1 : Types.value_description)
     (vd2 : Types.value_description) =
+  begin match val_approx vd1, val_approx vd2 with
+  | a1, (Some _ as a2) when a1 <> a2 -> raise Dont_match
+  | _ -> ()
+  end;
   Builtin_attributes.check_alerts_inclusion
     ~def:vd1.val_loc
     ~use:vd2.val_loc
@@ -145,6 +149,7 @@ type record_mismatch =
   | Label_names of int * Ident.t * Ident.t
   | Label_missing of position * Ident.t
   | Unboxed_float_representation of position
+  | Label_properties of Ident.t
 
 type constructor_mismatch =
   | Type
@@ -159,6 +164,7 @@ type variant_mismatch =
                             * constructor_mismatch
   | Constructor_names of int * Ident.t * Ident.t
   | Constructor_missing of position * Ident.t
+  | Constructor_properties of Ident.t
 
 type extension_constructor_mismatch =
   | Constructor_privacy
@@ -178,6 +184,13 @@ type type_mismatch =
   | Variant_mismatch of variant_mismatch
   | Unboxed_representation of position
   | Immediate of Type_immediacy.Violation.t
+  | Type_properties
+
+let diff_props attrs1 attrs2 =
+  !Clflags.strict_props &&
+  let p1 = List.flatten (Ast_helper.get_str_props attrs1) in
+  let p2 = List.flatten (Ast_helper.get_str_props attrs2) in
+  p1 <> p2
 
 let report_label_mismatch first second ppf err =
   let pr fmt = Format.fprintf ppf fmt in
@@ -208,6 +221,8 @@ let report_record_mismatch first second decl ppf err =
       pr "@[<hv>Their internal representations differ:@ %s %s %s.@]"
         (choose ord first second) decl
         "uses unboxed float representation"
+  | Label_properties id ->
+      pr "Type properties of label %s differ" (Ident.name id)
 
 let report_constructor_mismatch first second decl ppf err =
   let pr fmt  = Format.fprintf ppf fmt in
@@ -240,6 +255,8 @@ let report_variant_mismatch first second decl ppf err =
   | Constructor_missing (ord, s) ->
       pr "The constructor %s is only present in %s %s."
         (Ident.name s) (choose ord first second) decl
+  | Constructor_properties id ->
+      pr "Type properties of constructor %s differ" (Ident.name id)
 
 let report_extension_constructor_mismatch first second decl ppf err =
   let pr fmt = Format.fprintf ppf fmt in
@@ -267,6 +284,8 @@ let report_type_mismatch0 first second decl ppf err =
       pr "Their internal representations differ:@ %s %s %s."
          (choose ord first second) decl
          "uses unboxed representation"
+  | Type_properties ->
+      pr "Their type properties differ"
   | Immediate violation ->
       let first = StringLabels.capitalize_ascii first in
       match violation with
@@ -317,6 +336,7 @@ and compare_variants ~loc env params1 params2 n
   | cd1::rem1, cd2::rem2 ->
       if Ident.name cd1.cd_id <> Ident.name cd2.cd_id then
         Some (Constructor_names (n, cd1.cd_id, cd2.cd_id))
+      else if diff_props cd1.cd_attributes cd2.cd_attributes then Some (Constructor_properties cd1.cd_id)
       else begin
         Builtin_attributes.check_alerts_inclusion
           ~def:cd1.cd_loc
@@ -353,6 +373,7 @@ and compare_records ~loc env params1 params2 n
   | ld1::rem1, ld2::rem2 ->
       if Ident.name ld1.ld_id <> Ident.name ld2.ld_id
       then Some (Label_names (n, ld1.ld_id, ld2.ld_id))
+      else if diff_props ld1.ld_attributes ld2.ld_attributes then Some (Label_properties ld1.ld_id)
       else begin
         Builtin_attributes.check_deprecated_mutable_inclusion
           ~def:ld1.ld_loc
@@ -429,16 +450,28 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           mark usage cstrs1;
           if equality then mark Env.Positive cstrs2
         end;
+        let err =
         Option.map
           (fun var_err -> Variant_mismatch var_err)
           (compare_variants ~loc env decl1.type_params decl2.type_params 1
              cstrs1 cstrs2)
+        in
+        if err <> None then err else
+        if diff_props decl1.type_attributes decl2.type_attributes
+        then Some Type_properties
+        else None
     | (Type_record(labels1,rep1), Type_record(labels2,rep2)) ->
+        let err =
         Option.map (fun rec_err -> Record_mismatch rec_err)
           (compare_records_with_representation ~loc env
              decl1.type_params decl2.type_params 1
              labels1 labels2
              rep1 rep2)
+        in
+        if err <> None then err else
+        if diff_props decl1.type_attributes decl2.type_attributes
+        then Some Type_properties
+        else None
     | (Type_open, Type_open) -> None
     | (_, _) -> Some Kind
   in
@@ -475,6 +508,43 @@ let type_declarations ?(equality = false) ~loc env ~mark name
         imp abstr (imp p2 p1 && imp n2 n1 && imp i2 i1 && imp j2 j1))
       decl2.type_params (List.combine decl1.type_variance decl2.type_variance)
   then None else Some Variance
+
+let type_declarations ?equality ~loc env ~mark name decl1 path decl2 =
+  let is_class =
+    List.exists (fun {Parsetree.attr_name={txt}} -> txt="#class") decl1.type_attributes
+    || name.[0] = '#'
+  in
+(*
+  Format.printf "decl1 = %a@." (Printtyp.type_declaration (Ident.create name)) decl1;
+  List.iter (fun ({txt}, _) -> Format.printf "  %s@." txt) decl1.type_attributes;
+  Format.printf "decl2 = %a@." (Printtyp.type_declaration (Ident.create name)) decl2;
+  List.iter (fun ({txt}, _) -> Format.printf "  %s@." txt) decl2.type_attributes;
+*)
+  if !Clflags.strict_props then
+    let r = type_declarations ?equality ~loc env ~mark name decl1 path decl2 in
+    if r = None then None
+    else begin
+      Clflags.strict_props := false;
+      if not is_class then begin
+(*
+        Format.printf "decl1 = %a@." (Printtyp.type_declaration (Ident.create_local name)) decl1;
+        List.iter (fun {Parsetree.attr_name={txt}} -> Format.printf "  %s@." txt) decl1.type_attributes;
+        Format.printf "decl2 = %a@." (Printtyp.type_declaration (Ident.create_local name)) decl2;
+        List.iter (fun {Parsetree.attr_name={txt}} -> Format.printf "  %s@." txt) decl2.type_attributes;
+*)
+        Location.prerr_warning loc (Warnings.Property_change (name, decl1.type_loc, decl2.type_loc));
+      end;
+      Misc.try_finally
+        (fun () -> type_declarations ?equality ~loc env ~mark name decl1 path decl2)
+        ~always:(fun () -> Clflags.strict_props := true)
+    end
+  else
+    type_declarations ?equality ~loc env ~mark name decl1 path decl2
+
+let type_declarations ?equality ~loc env ~mark name decl1 path decl2 =
+  Btype.keeping_props
+    (fun () -> type_declarations ?equality ~loc env ~mark name decl1 path decl2)
+
 
 (* Inclusion between extension constructors *)
 

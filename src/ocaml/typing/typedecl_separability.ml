@@ -207,6 +207,7 @@ let rec immediate_subtypes : type_expr -> type_expr list = fun ty ->
   | Tvar _ | Tunivar _ -> []
   | Tpoly (pty, _) -> [pty]
   | Tconstr (_path, tys, _) -> tys
+  | Tprop (_, ty) -> [ty]
 
 and immediate_subtypes_object_row acc ty = match (Ctype.repr ty).desc with
   | Tnil -> acc
@@ -511,6 +512,8 @@ let check_type
             | Deepsep -> Hyps.poison hyps in
           context ++ check_type hyps ty (compose m m_param) in
         List.fold_left on_param empty (List.combine tys msig)
+    | (Tprop(_,ty), m) ->
+        check_type hyps ty m
   in
   check_type Hyps.empty ty m
 

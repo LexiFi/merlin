@@ -25,6 +25,9 @@ type loc = {
 }
 
 type t =
+  | Property_change of string * loc * loc   (* 104 *) (* Q *)
+  | Bad_witness_for_abstract_type of string (* 108 *)
+  | Not_a_global_type of string             (* 110 *)
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
 (*| Deprecated --> alert "deprecated" *)    (*  3 *)
@@ -104,6 +107,9 @@ type t =
 type alert = {kind:string; message:string; def:loc; use:loc}
 
 let number = function
+  | Property_change _ -> 104
+  | Bad_witness_for_abstract_type _ -> 108
+  | Not_a_global_type _ -> 110
   | Comment_start -> 1
   | Comment_not_end -> 2
   | Fragile_match _ -> 4
@@ -173,7 +179,8 @@ let number = function
   | Match_on_mutable_state_prevent_uncurry -> 68
 ;;
 
-let last_warning_number = 68
+let last_ocaml_warning_number = 68
+let last_warning_number = 110
 ;;
 
 (* Third component of each tuple is the list of names for each warning. The
@@ -332,6 +339,12 @@ let descriptions =
     68, "Pattern-matching depending on mutable state prevents the remaining \
          arguments from being uncurried.",
     ["match-on-mutable-state-prevent-uncurry"];
+    104, "Different type properties.",
+    [];
+    108, "Bad witness for abstract type.",
+    [];
+    110, "Not a global type",
+    [];
   ]
 ;;
 
@@ -348,7 +361,10 @@ let name_to_number =
 let letter = function
   | 'a' ->
      let rec loop i = if i = 0 then [] else i :: loop (i - 1) in
-     loop last_warning_number
+     loop last_ocaml_warning_number
+  | '_' ->
+      let rec loop i = if i = 0 then [] else i :: loop (i - 1) in
+      loop last_warning_number
   | 'b' -> []
   | 'c' -> [1; 2]
   | 'd' -> [3]
@@ -533,7 +549,7 @@ let parse_opt error active errflag s =
   let rec loop i =
     if i >= String.length s then () else
     match s.[i] with
-    | 'A' .. 'Z' ->
+    | 'A' .. 'Z' | '_' ->
        List.iter set (letter (Char.lowercase_ascii s.[i]));
        loop (i+1)
     | 'a' .. 'z' ->
@@ -550,7 +566,7 @@ let parse_opt error active errflag s =
         let i, n1, n2 = get_range i in
         for n = n1 to min n2 last_warning_number do myset n done;
         loop i
-    | 'A' .. 'Z' ->
+    | 'A' .. 'Z' | '_' ->
        List.iter myset (letter (Char.lowercase_ascii s.[i]));
        loop (i+1)
     | 'a' .. 'z' ->
@@ -624,6 +640,12 @@ let message = function
   | Missing_record_field_pattern s ->
       "the following labels are not bound in this record pattern:\n" ^ s ^
       "\nEither bind these labels explicitly or add '; _' to the pattern."
+  | Property_change (s, _, _) ->
+      "different type properties for type " ^ s
+  | Bad_witness_for_abstract_type s ->
+      "bad witness for abstract type " ^ s
+  | Not_a_global_type s ->
+      Printf.sprintf "runtime type %s does not have a global name" s
   | Non_unit_statement ->
       "this expression should have type unit."
   | Redundant_case -> "this match case is unused."
@@ -849,11 +871,20 @@ let report w =
   | false -> `Inactive
   | true ->
      if is_error w then incr nerrors;
+      let sub_locs =
+        match w with
+        | Property_change (_, def, use) ->
+            [
+              def, "Definition";
+              use, "Expected signature";
+            ]
+        | _ -> []
+      in
      `Active
        { id = id_name w;
          message = message w;
          is_error = is_error w;
-         sub_locs = [];
+         sub_locs;
        }
 
 let report_alert (alert : alert) =
