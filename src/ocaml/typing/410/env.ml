@@ -2030,7 +2030,7 @@ let add_item_include root comp env =
     Sig_value(id, decl, _)     -> add_value id decl env
   | Sig_type(id, decl, _, _)   ->
       let decl = {decl with type_attributes = decl.type_attributes @ root_attr root} in
-      add_type ~check:false id decl env
+      add_type ~check:false ~predef:false id decl env
   | Sig_typext(id, ext, _, _)  -> add_extension ~check:false id ext env
   | Sig_module(id, mp, md, _, _)  ->
       let md = {md with md_attributes = md.md_attributes @ root_attr root} in
