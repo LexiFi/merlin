@@ -47,6 +47,45 @@ let is_lazy_let e =
 let remove_lazy_attr =
   List.filter (function {attr_name={txt="mlfi.lazy"};_} -> false | _ -> true)
 
+type gregorian = {year: int; month: int; day: int; hour: int; minute: int}
+
+type date = int
+
+let hours_in_day = 24
+let minutes_in_day = hours_in_day * 60
+let minutes_to_noon = (hours_in_day / 2) * 60
+let max_date_ = 168306480
+let min_date_ = 3600
+let[@inline] date_of_int t = if t < min_date_ then min_date_ else if max_date_ < t then max_date_ else t
+let date_of_gregorian {year = y; month = m; day = d; hour = hr; minute = mn} =
+  let t =
+    (
+      (match m with
+       | 1 | 2 ->
+           ( 1461 * ( y + 4800 - 1 ) ) / 4 +
+           ( 367 * ( m + 10 ) ) / 12 -
+           ( 3 * ( ( y + 4900 - 1 ) / 100 ) ) / 4
+       | _ ->
+           ( 1461 * ( y + 4800 ) ) / 4 +
+           ( 367 * ( m - 2 ) ) / 12 -
+           ( 3 * ( ( y + 4900 ) / 100 ) ) / 4)
+      + d - 32075 - 2444238) * minutes_in_day
+    + hr * 60 + mn in
+  date_of_int t
+
+external int_of_date : date -> int = "%identity"
+
+let check_date ~year ~month ~day =
+  1 <= day &&
+  1 <= month && month <= 12 &&
+  1980 <= year && year <= 2299 &&
+  begin day <= 28 || match month with
+    | 2 -> day = 29 && year land 3 = 0 && year <> 2100 && year <> 2200
+    | 4 | 6 | 9 | 11 -> day <= 30
+    | _ -> day <= 31
+  end
+
+
 let date_of_str_const s =
   let i = ref 0 in
   let read_int n =
