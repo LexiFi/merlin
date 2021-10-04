@@ -88,7 +88,7 @@ val type_let:
 val type_expression:
         Env.t -> Parsetree.expression -> Typedtree.expression
 val type_implicit_arg:
-  Parsetree.expression option -> Env.t -> Location.t -> Types.type_expr -> Typedtree.expression
+  Env.t -> Location.t -> Types.type_expr -> Typedtree.expression
 val type_class_arg_pattern:
         string -> Env.t -> Env.t -> arg_label -> Parsetree.pattern ->
         Typedtree.pattern *

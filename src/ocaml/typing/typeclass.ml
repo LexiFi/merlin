@@ -1153,7 +1153,7 @@ and class_expr_aux cl_num val_env met_env scl =
                     if Btype.is_optional l && has_non_labelled then
                       eliminate_optional_arg ()
                     else if has_non_labelled && not !Clflags.pure_caml && Typecore.has_implicit ty then
-                      Some (type_implicit_arg None val_env scl.pcl_loc ty)
+                      Some (type_implicit_arg val_env scl.pcl_loc ty)
                     else
                       None
             in

@@ -3172,7 +3172,7 @@ and type_expect_
       end_def ();
       wrap_trace_gadt_instances env (lower_args []) ty;
       begin_def ();
-      let (args, ty_res) = type_application sexp env funct sargs in
+      let (args, ty_res) = type_application env funct sargs in
       end_def ();
       unify_var env (newvar()) funct.exp_type;
       let exp =
@@ -4901,7 +4901,7 @@ and type_argument ?explanation ?recarg env sarg ty_expected' ty_expected =
       unify_exp env texp ty_expected;
       texp
 
-and type_application sexp env funct sargs =
+and type_application env funct sargs =
   (* funct.exp_type may be generic *)
   let result_type omitted ty_fun =
     List.fold_left
@@ -5052,7 +5052,7 @@ and type_application sexp env funct sargs =
                 if optional && has_non_labelled then
                   eliminate_optional_arg ()
                 else if has_non_labelled && not !Clflags.pure_caml && has_implicit ty then
-                  Some (fun () -> type_implicit_arg (Some sexp) env funct.exp_loc ty)
+                  Some (fun () -> type_implicit_arg env funct.exp_loc ty)
                 else begin
                   (* No argument was given for this parameter, we abstract over
                      it. *)
@@ -5753,45 +5753,12 @@ and type_let ?(lazy_flag = NonLazy) ?bind
 
 (* Typing of implicit arguments *)
 
-and type_implicit_arg sexp env loc ty =
+and type_implicit_arg env loc ty =
   let ghloc = {loc with Location.loc_ghost = true} in
   let mk e = Ast_helper.Exp.mk ~loc:ghloc e in
-  let construct c args =
-    let a = match args with
-      | [] -> None
-      | [x] -> Some x
-      | l -> Some (mk (Pexp_tuple l))
-    in
-    mk (Pexp_construct (mknoloc (Longident.parse c), a)) in
   let str s = mk (Pexp_constant (Pconst_string (s, Location.none, None))) in
-  let mk_cons e rest = construct "::" [e; rest] in
-  let nil = construct "[]" [] in
-  let mk_list l = List.fold_right mk_cons l nil in
 
   let call_site () =
-    let get_lid lid = str (String.concat "." (Longident.flatten lid.txt)) in
-    let rec get_expr e =
-      match e.pexp_desc with
-      | Pexp_constant (Pconst_string (s, _, _)) ->
-          construct "Mlfi_types.StackTrace.String" [str s]
-      | Pexp_constant (Pconst_integer(_,None)) as d ->
-          construct "Mlfi_types.StackTrace.Int" [mk d]
-      | Pexp_constant (Pconst_float (s, _)) ->
-          construct "Mlfi_types.StackTrace.Float" [str s]
-      | Pexp_ident lid ->
-          construct "Mlfi_types.StackTrace.Longident" [get_lid lid]
-      | Pexp_construct (lid, None) ->
-          construct "Mlfi_types.StackTrace.Construct" [get_lid lid; construct "None" []]
-      | Pexp_construct (lid, Some e) ->
-          construct "Mlfi_types.StackTrace.Construct" [get_lid lid; construct "Some" [get_expr e]]
-      | Pexp_tuple l ->
-          construct "Mlfi_types.StackTrace.Tuple" [mk_list (List.map get_expr l)]
-      | Pexp_apply (f, args) ->
-          let args = mk_list (List.map (fun (lab, arg) -> mk (Pexp_tuple [str (label_name lab); get_expr arg])) args) in
-          construct "Mlfi_types.StackTrace.Apply" [mk (Pexp_tuple [get_expr f; args])]
-      | _ ->
-          construct "Mlfi_types.StackTrace.Unknown" []
-    in
     let fields =
       [mknoloc (Longident.parse "Mlfi_types.StackTrace.directory"),
        str (Filename.dirname (Location.absolute_path (loc.Location.loc_start.Lexing.pos_fname)));
@@ -5801,8 +5768,6 @@ and type_implicit_arg sexp env loc ty =
        mk (Pexp_constant (Pconst_integer
                             (string_of_int loc.Location.loc_start.Lexing.pos_lnum,
                              None)));
-       mknoloc (Longident.parse "expr"),
-       (match sexp with Some sexp -> get_expr sexp | None -> construct "Mlfi_types.StackTrace.Unknown" [])
       ]
     in
     mk (Pexp_record (fields, None))
