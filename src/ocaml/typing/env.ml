@@ -2090,6 +2090,11 @@ let rec add_signature_include root sg env =
   match sg with
     [] -> env
   | comp :: rem -> add_signature_include root rem (add_item_include root comp env)
+
+let enter_signature_include ~root ~scope sg env =
+  let sg = Subst.signature (Rescope scope) Subst.identity sg in
+  sg, add_signature_include root sg env
+
 (* END LEXIFI *)
 
 let enter_signature ~scope sg env =

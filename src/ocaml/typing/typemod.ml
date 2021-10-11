@@ -2576,20 +2576,18 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
           Builtin_attributes.warning_scope sincl.pincl_attributes
             (fun () -> type_module true funct_body None env smodl)
         in
-        let scope = Ctype.create_scope () in
-        (* Rename all identifiers bound by this signature to avoid clashes *)
-        let sg, new_env = Env.enter_signature ~scope
-            (extract_sig_open env smodl.pmod_loc modl.mod_type) env in
-        let new_env = Env.update_short_paths new_env in
-        List.iter (Signature_names.check_sig_item names loc) sg;
         (* BEGIN LEXIFI *)
         let root =
           match modl.mod_desc with
           | Tmod_ident (p, _) -> Typecore.full_name_mod env p
           | _ -> "*INCLUDED*"
         in
-        let new_env = Env.add_signature_include root sg new_env in (* LEXIFI *)
         (* END LEXIFI *)
+        let scope = Ctype.create_scope () in
+        (* Rename all identifiers bound by this signature to avoid clashes *)
+        let sg, new_env = (* Env.enter_signature LEXIFI *) Env.enter_signature_include ~root (* /LEXIFI *) ~scope
+            (extract_sig_open env smodl.pmod_loc modl.mod_type) env in
+        List.iter (Signature_names.check_sig_item names loc) sg;
         let incl =
           { incl_mod = modl;
             incl_type = sg;

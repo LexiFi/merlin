@@ -340,6 +340,8 @@ val enter_cltype:
    in the process. *)
 val enter_signature: scope:int -> signature -> t -> signature * t
 
+val enter_signature_include: root:string -> scope:int -> signature -> t -> signature * t (* LEXIFI *)
+
 val enter_unbound_value : string -> value_unbound_reason -> t -> t
 
 val enter_unbound_module : string -> module_unbound_reason -> t -> t
