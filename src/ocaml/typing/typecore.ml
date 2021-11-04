@@ -3065,13 +3065,18 @@ and type_expect_
         raise Syntaxerr.(Error (Illegal_date_value loc));
       let open Ast_helper in
       let e =
-        Exp.apply ~loc
+        let attr =
+          Attr.mk ~loc (Location.mkloc "ocaml.alert" loc)
+           (PStr [Str.eval ~loc (Exp.constant ~loc (Const.string "-old_date_api"))])
+        in
+        Exp.apply ~loc ~attrs:[attr]
           (Exp.ident ~loc (mkloc (Longident.parse "Stdlib.date_of_int") loc))
           [Nolabel,
            Exp.constant ~loc
              (Const.integer
                 (string_of_int (int_of_date (date_of_gregorian g))))]
       in
+      Location.alert ~kind:"old_date_api" loc "Use Mlfi_date.of_string instead.";
       type_expect env e ty_expected_explained
   | Pexp_constant cst ->
       let cst = constant_or_raise env loc cst in
