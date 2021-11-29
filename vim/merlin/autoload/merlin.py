@@ -88,6 +88,8 @@ def concat_map(f, args):
 
 def current_context():
     filename = vim.eval("expand('%:p')")
+    if platform == "cygwin":
+        filename = os.popen('cygpath -m ' + filename).read().strip()
     content = "\n".join(vim.current.buffer) + "\n"
     return (filename, content)
 
@@ -245,6 +247,8 @@ def command_document(path, pos):
 
 def differs_from_current_file(path):
     buf_path = vim.eval("expand('%:p')")
+    if platform == "cygwin":
+        buf_path = os.popen('cygpath -m ' + buf_path).read().strip()
     return buf_path != path
 
 def vim_fnameescape(s):
@@ -261,6 +265,8 @@ def goto_file_and_point(pos_or_err):
         vim.command("normal! m'")
         if "file" in pos_or_err and differs_from_current_file(pos_or_err['file']):
             fname = vim_fnameescape(pos_or_err['file'])
+            if platform == "cygwin":
+                fname = os.popen('cygpath -u ' + fname).read().strip()
             if split_method == "never":
                 vim.command(":keepjumps e %s" % fname)
             elif "tab" in split_method:
@@ -291,6 +297,8 @@ def command_locate(path, pos):
             if path is None:
                 pos_or_err = command("locate", "-look-for", choice, "-position", fmtpos(pos))
             else:
+                if platform == "cygwin":
+                    path = os.popen('cygpath -m ' + path).read().strip()
                 pos_or_err = command("locate", "-prefix", path, "-look-for", choice, "-position", fmtpos(pos))
         goto_file_and_point(pos_or_err)
     except MerlinExc as e:
@@ -301,7 +309,6 @@ def command_locate_type(pos):
     try:
         pos_or_err = command("locate-type", "-position", fmtpos(pos))
         goto_file_and_point(pos_or_err)
-            
     except MerlinExc as e:
         try_print_error(e)
 
