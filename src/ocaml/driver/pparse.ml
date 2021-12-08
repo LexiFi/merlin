@@ -41,7 +41,7 @@ let report_error = function
 external merlin_system_command : string -> int = "ml_merlin_system_command"
 
 let ppx_commandline cmd fn_in fn_out =
-  Printf.sprintf "%s %s %s 1>&2"
+  Printf.sprintf "%s %s %s"
     cmd (Filename.quote fn_in) (Filename.quote fn_out)
 
 let apply_rewriter magic ppx (fn_in, failures) =
