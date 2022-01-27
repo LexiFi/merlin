@@ -47,95 +47,6 @@ let is_lazy_let e =
 let remove_lazy_attr =
   List.filter (function {attr_name={txt="mlfi.lazy"};_} -> false | _ -> true)
 
-type gregorian = {year: int; month: int; day: int; hour: int; minute: int}
-
-type date = int
-
-let hours_in_day = 24
-let minutes_in_day = hours_in_day * 60
-let minutes_to_noon = (hours_in_day / 2) * 60
-let max_date_ = 168306480
-let min_date_ = 3600
-let[@inline] date_of_int t = if t < min_date_ then min_date_ else if max_date_ < t then max_date_ else t
-let date_of_gregorian {year = y; month = m; day = d; hour = hr; minute = mn} =
-  let t =
-    (
-      (match m with
-       | 1 | 2 ->
-           ( 1461 * ( y + 4800 - 1 ) ) / 4 +
-           ( 367 * ( m + 10 ) ) / 12 -
-           ( 3 * ( ( y + 4900 - 1 ) / 100 ) ) / 4
-       | _ ->
-           ( 1461 * ( y + 4800 ) ) / 4 +
-           ( 367 * ( m - 2 ) ) / 12 -
-           ( 3 * ( ( y + 4900 ) / 100 ) ) / 4)
-      + d - 32075 - 2444238) * minutes_in_day
-    + hr * 60 + mn in
-  date_of_int t
-
-external int_of_date : date -> int = "%identity"
-
-let check_date ~year ~month ~day =
-  1 <= day &&
-  1 <= month && month <= 12 &&
-  1980 <= year && year <= 2299 &&
-  begin day <= 28 || match month with
-    | 2 -> day = 29 && year land 3 = 0 && year <> 2100 && year <> 2200
-    | 4 | 6 | 9 | 11 -> day <= 30
-    | _ -> day <= 31
-  end
-
-
-let date_of_str_const s =
-  let i = ref 0 in
-  let read_int n =
-    assert (n >= 0);
-    if !i + n > String.length s then raise Exit;
-    let r = ref 0 in
-    for _ = 1 to n do
-      match s.[!i] with
-      | '0'..'9' as c ->
-          incr i;
-          r := !r * 10 + (Char.code c - Char.code '0')
-      | _ ->
-          raise Exit
-    done;
-    !r
-  in
-  let read_char c =
-    if !i >= String.length s then raise Exit;
-    if s.[!i] <> c then raise Exit;
-    incr i
-  in
-  let next () =
-    if !i >= String.length s then
-      None
-    else
-      (let c = s.[!i] in incr i; Some c)
-  in
-  let year = read_int 4 in
-  read_char '_';
-  let month = read_int 2 in
-  read_char '_';
-  let day = read_int 2 in
-  let hour, minute =
-    match next () with
-    | None ->
-        12, 0
-    | Some '.' ->
-        let hour = read_int 2 in
-        let minute = read_int 2 in
-        hour, minute
-    | Some _ ->
-        raise Exit
-  in
-  {year; month; day; hour; minute}
-
-let date_of_str_const s =
-  match date_of_str_const s with
-  | g -> Some g
-  | exception Exit -> None
-
 type type_forcing_context =
   | If_conditional
   | If_no_else_branch
@@ -3248,35 +3159,6 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   )
-  | Pexp_constant(Pconst_integer(s,Some 'T')|Pconst_float(s,Some 'T')) ->
-      let g =
-        match date_of_str_const s with
-        | None ->
-          raise Syntaxerr.(Error (Illegal_date_format loc))
-        | Some g ->
-          g
-      in
-      let check_date {year; month; day; hour; minute} =
-        check_date ~year ~month ~day &&
-        0 <= hour && hour <= 23 && 0 <= minute && minute <= 59
-      in
-      if not (check_date g) then
-        raise Syntaxerr.(Error (Illegal_date_value loc));
-      let open Ast_helper in
-      let e =
-        let attr =
-          Attr.mk ~loc (Location.mkloc "ocaml.alert" loc)
-           (PStr [Str.eval ~loc (Exp.constant ~loc (Const.string "-old_date_api"))])
-        in
-        Exp.apply ~loc ~attrs:[attr]
-          (Exp.ident ~loc (mkloc (Longident.parse "Stdlib.date_of_int") loc))
-          [Nolabel,
-           Exp.constant ~loc
-             (Const.integer
-                (string_of_int (int_of_date (date_of_gregorian g))))]
-      in
-      Location.alert ~kind:"old_date_api" loc "Use Mlfi_date.of_string instead.";
-      type_expect env e ty_expected_explained
   | Pexp_constant cst ->
       let cst = constant_or_raise env loc cst in
       rue {
