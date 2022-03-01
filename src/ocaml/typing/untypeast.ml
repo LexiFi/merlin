@@ -201,7 +201,6 @@ let structure_item sub item =
         Pstr_include (sub.include_declaration sub incl)
     | Tstr_attribute x ->
         Pstr_attribute x
-    | Tstr_usettype _ -> assert false
   in
   Str.mk ~loc desc
 

@@ -2849,22 +2849,6 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
           }
         in
         Tstr_include incl, sg, new_env
-(* BEGIN LEXIFI *)
-    | Pstr_extension (({txt="t"|"lexifi.t"},
-                       PStr [{pstr_desc =
-                                Pstr_value (Nonrecursive,
-                                            [{pvb_pat = {ppat_desc = Ppat_any | Ppat_constraint ({ppat_desc = Ppat_any}, _) as ppat_desc}; pvb_expr}])}]), _) ->
-        let open Ast_helper in
-        let t =
-          match ppat_desc with
-          | Ppat_any -> Typ.any ()
-          | Ppat_constraint ({ppat_desc = Ppat_any}, t) -> t
-          | _ -> assert false
-        in
-        let t = Typ.constr (mknoloc (Longident.parse "Mlfi_types.ttype")) [t] in
-        let expr = Typecore.type_expression env (Exp.constraint_ pvb_expr t) in
-        Tstr_usettype expr, [], env
-(* END LEXIFI *)
     | Pstr_extension (ext, _attrs) ->
         raise (Error_forward (Builtin_attributes.error_of_extension ext))
     | Pstr_attribute x ->

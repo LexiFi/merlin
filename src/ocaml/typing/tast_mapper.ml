@@ -130,8 +130,6 @@ let structure_item sub {str_desc; str_loc; str_env} =
           (List.map (tuple3 id id (sub.class_type_declaration sub)) list)
     | Tstr_include incl ->
         Tstr_include (include_infos (sub.module_expr sub) incl)
-    | Tstr_usettype e ->
-        Tstr_usettype (sub.expr sub e)
     | Tstr_open od -> Tstr_open (sub.open_declaration sub od)
     | Tstr_attribute _ as d -> d
   in

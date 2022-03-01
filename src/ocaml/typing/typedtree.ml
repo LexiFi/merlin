@@ -293,7 +293,6 @@ and structure_item_desc =
   | Tstr_class_type of (Ident.t * string loc * class_type_declaration) list
   | Tstr_include of include_declaration
   | Tstr_attribute of attribute
-  | Tstr_usettype of expression
 
 and module_binding =
     {

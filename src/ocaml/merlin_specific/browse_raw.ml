@@ -470,8 +470,6 @@ and of_structure_item_desc = function
     app (Open_declaration d)
   | Tstr_attribute _ ->
     id_fold
-  | Tstr_usettype _ ->
-    id_fold
 
 and of_module_type_desc = function
   | Tmty_ident _ | Tmty_alias _ -> id_fold

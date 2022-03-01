@@ -102,7 +102,6 @@ let structure_item sub {str_desc; str_env; _} =
       List.iter (fun (_, _, cltd) -> sub.class_type_declaration sub cltd) list
   | Tstr_include incl -> include_infos (sub.module_expr sub) incl
   | Tstr_open od -> sub.open_declaration sub od
-  | Tstr_usettype exp -> sub.expr sub exp
   | Tstr_attribute _ -> ()
 
 let value_description sub x = sub.typ sub x.val_desc

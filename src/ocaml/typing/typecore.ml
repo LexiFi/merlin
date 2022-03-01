@@ -2568,7 +2568,6 @@ and is_nonexpansive_mod mexp =
   | Tmod_structure str ->
       List.for_all
         (fun item -> match item.str_desc with
-          | Tstr_usettype _
           | Tstr_eval _ | Tstr_primitive _ | Tstr_type _
           | Tstr_modtype _ | Tstr_class_type _  -> true
           | Tstr_value (_, pat_exp_list) ->
@@ -4076,27 +4075,6 @@ and type_expect_
       in
       re { exp with exp_extra =
              (Texp_poly cty, loc, sexp.pexp_attributes) :: exp.exp_extra }
-  | Pexp_extension ({txt="t"|"lexifi.t"},
-                    PStr [{pstr_desc =
-                             Pstr_eval ({pexp_desc =
-                                           Pexp_let (Nonrecursive,
-                                                     [{pvb_pat = {ppat_desc = Ppat_any | Ppat_constraint ({ppat_desc = Ppat_any}, _) as ppat_desc}; pvb_expr}], e)}, _)}]) ->
-      let e =
-        let open Ast_helper in
-        let pvb_expr =
-          let t =
-            match ppat_desc with
-            | Ppat_any -> Typ.any ()
-            | Ppat_constraint ({ppat_desc = Ppat_any}, t) -> t
-            | _ -> assert false
-          in
-          let t = Typ.constr (mknoloc (Longident.parse "Mlfi_types.ttype")) [t] in
-          Exp.constraint_ ~loc pvb_expr t
-        in
-        Exp.apply ~loc (Exp.ident ~loc (mkloc (Longident.parse "Mlfi_types.__use_ttype") loc))
-          [Nolabel, pvb_expr; Nolabel, e]
-      in
-      type_expect env e ty_expected_explained
   | Pexp_extension ({txt="p"|"lexifi.p"}, payload) ->
       let steps = Ast_helper.decode_typath ~loc payload in
       let tsteps, exp_type = type_typath env loc steps ty_expected in

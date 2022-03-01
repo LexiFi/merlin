@@ -989,9 +989,6 @@ and structure_item : Typedtree.structure_item -> bind_judg =
     | Tstr_class_type _
     | Tstr_attribute _ ->
       env
-    | Tstr_usettype e ->
-      let judg_e = expression e << Guard in
-      Env.join (judg_e m) env
     | Tstr_open od ->
       open_declaration od m env
     | Tstr_class classes ->

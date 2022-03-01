@@ -879,9 +879,6 @@ and structure_item i ppf x =
       module_expr i ppf incl.incl_mod;
   | Tstr_attribute a ->
       attribute i ppf "Tstr_attribute" a
-  | Tstr_usettype e ->
-      line i ppf "Pstr_usettype\n";
-      expression i ppf e
 
 and longident_x_with_constraint i ppf (li, _, wc) =
   line i ppf "%a\n" fmt_path li;
