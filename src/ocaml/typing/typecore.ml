@@ -315,6 +315,7 @@ let ttype_path = path_is "Mlfi_types.ttype"
 let call_site_path = path_is "Mlfi_types.StackTrace.call_site"
 
 let typath_type_path = lazy (lookup_type "Mlfi_type_path.t")
+let ttype_type_path = lazy (lookup_type "Mlfi_types.ttype")
 
 type auto_type =
   | Auto_ttype of type_expr
@@ -332,11 +333,6 @@ let has_implicit ty =
   match classify_auto_type ty with
   | Auto_ttype _ | Auto_call_site -> true
   | Auto_none -> false
-
-let is_ttype ty =
-  match classify_auto_type ty with
-  | Auto_ttype r -> Some r
-  | _ -> None
 
 let rec copy_known_part ty =
   let ty = repr ty in
@@ -2416,8 +2412,11 @@ let type_self_pattern cl_num privty val_env met_env par_env spat =
 
 type delayed_check = ((unit -> unit) * Warnings.state)
 
+let delayed_dtypes = ref []
 let delayed_checks = ref []
-let reset_delayed_checks () = delayed_checks := []
+let reset_delayed_checks () = delayed_dtypes := []; delayed_checks := []
+let add_delayed_dtype ty =
+  delayed_dtypes := (ty, Warnings.backup ()) :: !delayed_dtypes
 let add_delayed_check f =
   delayed_checks := (f, Warnings.backup ()) :: !delayed_checks
 
@@ -2426,22 +2425,16 @@ let force_delayed_checks () =
   let snap = Btype.snapshot () in
   let w_old = Warnings.backup () in
   List.iter
+    (fun (ty, w) -> Warnings.restore w;
+      try ignore (Dtype.stype_of_type ty) with exn -> Msupport.raise_error exn)
+    (List.rev !delayed_dtypes);
+  List.iter
     (fun (f, w) -> Warnings.restore w;
       try f () with exn -> Msupport.raise_error exn)
     (List.rev !delayed_checks);
   Warnings.restore w_old;
   reset_delayed_checks ();
   Btype.backtrack snap
-
-let delayed_checks_after_dyntypes = ref []
-let reset_delayed_checks_after_dyntypes () = delayed_checks_after_dyntypes := []
-let add_delayed_check_after_dyntypes f = delayed_checks_after_dyntypes := (f, Warnings.backup ()) :: !delayed_checks_after_dyntypes
-let force_delayed_checks_after_dyntypes () =
-  let w_old = Warnings.backup () in
-  List.iter (fun (f, w) -> Warnings.restore w;
-             try f () with exn -> Msupport.raise_error exn) (List.rev !delayed_checks_after_dyntypes);
-  Warnings.restore w_old;
-  reset_delayed_checks_after_dyntypes ()
 
 let rec final_subexpression exp =
   match exp.exp_desc with
@@ -2555,7 +2548,8 @@ let rec is_nonexpansive exp =
   | Texp_letexception _
   | Texp_letop _
   | Texp_extension_constructor _
-  | Texp_typath _ ->
+  | Texp_typath _
+  | Texp_typeof _ ->
     false
 
 and is_nonexpansive_mod mexp =
@@ -2766,7 +2760,7 @@ let check_partial_application statement exp =
             | Texp_setinstvar _ | Texp_override _ | Texp_assert _
             | Texp_lazy _ | Texp_object _ | Texp_pack _ | Texp_unreachable
             | Texp_extension_constructor _ | Texp_ifthenelse (_, _, None)
-            | Texp_function _ | Texp_typath _ ->
+            | Texp_function _ | Texp_typath _ | Texp_typeof _ ->
                 check_statement ()
             | Texp_match (_, cases, _) ->
                 List.iter (fun {c_rhs; _} -> check c_rhs) cases
@@ -3031,11 +3025,6 @@ let with_explanation explanation f =
         when not loc'.Location.loc_ghost ->
         let err = Expr_type_clash(trace', Some explanation, exp') in
         raise (Error (loc', env', err))
-
-let ttype_of ~loc sty =
-  let open Ast_helper.Exp in
-  apply ~loc (ident ~loc (mkloc (Longident.parse "Mlfi_types.internal_ttype_of") loc))
-    [Nolabel, constraint_ ~loc (assert_ ~loc (construct ~loc (mkloc (Longident.Lident "false") loc) None)) sty]
 
 let rec type_exp ?recarg env sexp =
   (* We now delegate everything to type_expect *)
@@ -4087,7 +4076,16 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
       }
   | Pexp_extension ({txt="t"|"lexifi.t"}, PTyp sty) ->
-      type_expect env (ttype_of ~loc sty) ty_expected_explained
+      let ty = Typetexp.transl_simple_type env false sty in
+      add_delayed_dtype ty;
+      rue {
+        exp_desc = Texp_typeof ty;
+        exp_loc = loc;
+        exp_type = newgenty (Tconstr(Lazy.force ttype_type_path, [ty.ctyp_type], ref Mnil));
+        exp_extra = [];
+        exp_env = env;
+        exp_attributes = sexp.pexp_attributes;
+      }
   | Pexp_extension ({txt="fields_of"}, PTyp sty) ->
       let ty = (Typetexp.transl_simple_type env false sty).ctyp_type in
       let ty = Ctype.expand_head env ty in
@@ -5720,7 +5718,7 @@ and type_let ?(lazy_flag = NonLazy) ?bind
                   let name = Ident.name id in
                   let used = ref false in
                   if not (name = "" || name.[0] = '_' || name.[0] = '#') then
-                    add_delayed_check_after_dyntypes
+                    add_delayed_check
                       (fun () ->
                          if not !used then
                            Location.prerr_warning vd.Types.val_loc
@@ -5869,7 +5867,10 @@ and type_implicit_arg env loc ty =
 
   match classify_auto_type ty with
   | Auto_ttype t ->
-      let e = type_expect env (ttype_of ~loc:ghloc (Ast_helper.Typ.any ())) (mk_expected ty) in
+      let e =
+        type_expect env (Ast_helper.Exp.extension (Location.mknoloc "lexifi.t", PTyp (Ast_helper.Typ.any ~loc:ghloc ())))
+          (mk_expected ty)
+      in
       begin match (Ctype.repr t).desc, !level_for_implicit_ttype with
       | Tvar _, None -> unify_exp env e (new_global_var ())
       | Tvar _, Some lvl -> unify_exp env e (Btype.newty2 lvl (Tvar None))
@@ -5975,78 +5976,6 @@ let type_expression env sexp =
       let (_path, desc) = Env.lookup_value ~use:false ~loc lid.txt env in
       {exp with exp_type = desc.val_type}
   | _ -> exp
-
-(* BEGIN LEXIFI *)
-(* Naming of types for runtime representations *)
-let builtin_type =
-  let tbl = Hashtbl.create 16 in
-  List.iter
-    (fun (_, id) -> Hashtbl.add tbl id ())
-    Predef.builtin_idents;
-  Hashtbl.mem tbl
-
-let ident_stdlib = Ident.create_persistent "Stdlib"
-
-let rec full_name_mod env path =
-  let open Parsetree in
-  let open Path in
-  let path = Env.normalize_module_path (Some Location.none) env path in
-  let path = Printtyp.rewrite_double_underscore_paths env path in
-  match path with
-  | Pident id ->
-      if Ident.persistent id then Ident.name id
-      else begin try
-          let md = Env.find_module path env in
-          let root =
-            List.fold_left
-              (fun root -> function
-                 | {attr_name = {txt="#localmodule#"; _}; _} -> "*LOCAL*"
-                 | {attr_name = {txt="#funarg#"; _}; _} -> "*FUNARG*"
-                 | {attr_name = {txt="#root#"; _};
-                    attr_payload = PTyp {ptyp_desc=Ptyp_var s}; _} -> s
-                 | _ -> root
-              ) "*UNKNOWN*" md.md_attributes
-          in
-          root ^ "." ^ Ident.name id
-        with Not_found ->
-          Printf.sprintf "*?*.%s" (Path.name path)
-      end
-  | Pdot (Pident id, s) when Ident.same id ident_stdlib ->
-      s
-  | Pdot (p, s) ->
-      full_name_mod env p ^ "." ^ s
-  | Papply(m1, m2) ->
-      Printf.sprintf "%s(%s)"
-        (full_name_mod env m1)
-        (full_name_mod env m2)
-
-let full_name_typ env path =
-  let open Parsetree in
-  let open Path in
-  match path with
-  | Pident id when builtin_type id ->
-      Ident.name id
-  | Pident id ->
-      begin try
-        let td = Env.find_type path env in
-        let root =
-          List.fold_left
-            (fun root -> function
-               | {attr_name = {txt="#root#"; _};
-                  attr_payload = PTyp {ptyp_desc=Ptyp_var s}; _} -> s
-               | {attr_name = {txt="#localtype#"; _}; _} -> "*LOCAL*"
-               | _ -> root
-            ) "*UNKNOWN*" td.type_attributes
-        in
-        root ^ "." ^ Ident.name id
-      with Not_found ->
-        Printf.sprintf "*?*.%s" (Path.name path)
-      end
-  | Pdot (p, s) ->
-      full_name_mod env p ^ "." ^ s
-  | Papply _ ->
-      assert false
-(* END LEXIFI *)
 
 (* Error report *)
 
@@ -6517,8 +6446,8 @@ let () =
     )
 
 let () =
-  Persistent_env.add_delayed_check_forward := add_delayed_check_after_dyntypes;
-  Env.add_delayed_check_forward := add_delayed_check_after_dyntypes;
+  Persistent_env.add_delayed_check_forward := add_delayed_check;
+  Env.add_delayed_check_forward := add_delayed_check;
   ()
 
 (* drop ?recarg argument from the external API *)

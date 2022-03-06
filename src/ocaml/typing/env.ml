@@ -3100,13 +3100,13 @@ let find_module_by_name lid env =
   let loc = Location.(in_file !input_name) in
   lookup_module ~errors:false ~use:false ~loc lid env
 
-let find_value_by_name lid env =
+let find_value_by_name ?(use = false) lid env =
   let loc = Location.(in_file !input_name) in
-  lookup_value ~errors:false ~use:false ~loc lid env
+  lookup_value ~errors:false ~use ~loc lid env
 
-let find_type_by_name lid env =
+let find_type_by_name ?(use = false) lid env =
   let loc = Location.(in_file !input_name) in
-  lookup_type ~errors:false ~use:false ~loc lid env
+  lookup_type ~errors:false ~use ~loc lid env
 
 let find_modtype_by_name lid env =
   let loc = Location.(in_file !input_name) in
@@ -3819,7 +3819,7 @@ and short_paths_functor_components_desc env mpath comp path =
           mty
       in
       let loc = Location.(in_file !input_name) in
-      let comps = 
+      let comps =
         components_of_functor_appl ~loc ~f_comp:f env ~f_path:mpath ~arg:path
       in
       let mpath = Papply(mpath, path) in

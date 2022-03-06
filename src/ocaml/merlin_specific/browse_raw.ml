@@ -384,6 +384,8 @@ let of_expression_desc loc = function
         | Ttypath_list e | Ttypath_array e ->
           of_expression e
       ) steps
+  | Texp_typeof ct ->
+    of_core_type ct
   | Texp_open (od, e) ->
     app (Module_expr od.open_expr) ** of_expression e
 

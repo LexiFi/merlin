@@ -204,7 +204,8 @@ let classify_expression : Typedtree.expression -> sd =
     | Texp_assert _
     | Texp_try _
     | Texp_override _
-    | Texp_letop _ ->
+    | Texp_letop _
+    | Texp_typeof _ ->
         Dynamic
   and classify_value_bindings rec_flag env bindings =
     (* We use a non-recursive classification, classifying each
@@ -838,6 +839,8 @@ let rec expression : Typedtree.expression -> term_judg =
         ) empty l
     | Texp_open (od, e) ->
       open_declaration od >> expression e
+    | Texp_typeof _ ->
+      empty
 
 and binding_op : Typedtree.binding_op -> term_judg =
   fun bop ->

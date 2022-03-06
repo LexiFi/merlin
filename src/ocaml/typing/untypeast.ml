@@ -529,6 +529,8 @@ let expression sub exp =
                              ])
     | Texp_open (od, exp) ->
         Pexp_open (sub.open_declaration sub od, sub.expr sub exp)
+    | Texp_typeof ty ->
+        Pexp_extension (mknoloc "lexifi.t", PTyp (sub.typ sub ty))
     | Texp_hole -> Pexp_hole
   in
   List.fold_right (exp_extra sub) exp.exp_extra

@@ -2279,3 +2279,75 @@ let shorten_class_type_path env p =
 
 let () =
   Env.shorten_module_path := shorten_module_path
+
+(* BEGIN LEXIFI *)
+(* Naming of types for runtime representations *)
+let builtin_type =
+  let tbl = Hashtbl.create 16 in
+  List.iter
+    (fun (_, id) -> Hashtbl.add tbl id ())
+    Predef.builtin_idents;
+  Hashtbl.mem tbl
+
+let ident_stdlib = Ident.create_persistent "Stdlib"
+
+let rec full_name_mod env path =
+  let open Parsetree in
+  let open Path in
+  let path = Env.normalize_module_path (Some Location.none) env path in
+  let path = rewrite_double_underscore_paths env path in
+  match path with
+  | Pident id ->
+      if Ident.persistent id then Ident.name id
+      else begin try
+          let md = Env.find_module path env in
+          let root =
+            List.fold_left
+              (fun root -> function
+                 | {attr_name = {txt="#localmodule#"; _}; _} -> "*LOCAL*"
+                 | {attr_name = {txt="#funarg#"; _}; _} -> "*FUNARG*"
+                 | {attr_name = {txt="#root#"; _};
+                    attr_payload = PTyp {ptyp_desc=Ptyp_var s}; _} -> s
+                 | _ -> root
+              ) "*UNKNOWN*" md.md_attributes
+          in
+          root ^ "." ^ Ident.name id
+        with Not_found ->
+          Printf.sprintf "*?*.%s" (Path.name path)
+      end
+  | Pdot (Pident id, s) when Ident.same id ident_stdlib ->
+      s
+  | Pdot (p, s) ->
+      full_name_mod env p ^ "." ^ s
+  | Papply(m1, m2) ->
+      Printf.sprintf "%s(%s)"
+        (full_name_mod env m1)
+        (full_name_mod env m2)
+
+let full_name_typ env path =
+  let open Parsetree in
+  let open Path in
+  match path with
+  | Pident id when builtin_type id ->
+      Ident.name id
+  | Pident id ->
+      begin try
+        let td = Env.find_type path env in
+        let root =
+          List.fold_left
+            (fun root -> function
+               | {attr_name = {txt="#root#"; _};
+                  attr_payload = PTyp {ptyp_desc=Ptyp_var s}; _} -> s
+               | {attr_name = {txt="#localtype#"; _}; _} -> "*LOCAL*"
+               | _ -> root
+            ) "*UNKNOWN*" td.type_attributes
+        in
+        root ^ "." ^ Ident.name id
+      with Not_found ->
+        Printf.sprintf "*?*.%s" (Path.name path)
+      end
+  | Pdot (p, s) ->
+      full_name_mod env p ^ "." ^ s
+  | Papply _ ->
+      assert false
+(* END LEXIFI *)

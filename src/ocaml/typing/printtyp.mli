@@ -222,3 +222,6 @@ val rewrite_double_underscore_paths: Env.t -> Path.t -> Path.t
 (** [printed_signature sourcefile ppf sg] print the signature [sg] of
     [sourcefile] with potential warnings for name collisions *)
 val printed_signature: string -> formatter -> signature -> unit
+
+val full_name_mod: Env.t -> Path.t -> string (* LEXIFI *)
+val full_name_typ: Env.t -> Path.t -> string (* LEXIFI *)

@@ -286,6 +286,7 @@ and expression_desc =
   | Texp_extension_constructor of Longident.t loc * Path.t
   | Texp_open of open_declaration * expression
         (** let open[!] M in e *)
+  | Texp_typeof of core_type
   | Texp_hole
 
 and typath_step =

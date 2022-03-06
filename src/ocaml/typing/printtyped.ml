@@ -446,6 +446,9 @@ and expression i ppf x =
       module_expr i ppf o.open_expr;
       attributes i ppf o.open_attributes;
       expression i ppf e;
+  | Texp_typeof ty ->
+      line i ppf "Texp_typeof\n";
+      core_type i ppf ty
   | Texp_hole ->
       line i ppf "Texp_hole"
 
