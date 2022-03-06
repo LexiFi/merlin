@@ -35,9 +35,6 @@ type constructor_usage_warning =
   | Only_exported_private
 
 type t =
-  | Property_change of string * loc * loc   (* 104 *) (* Q *)
-  | Bad_witness_for_abstract_type of string (* 108 *)
-  | Not_a_global_type of string             (* 110 *)
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
 (*| Deprecated --> alert "deprecated" *)    (*  3 *)
@@ -119,9 +116,6 @@ type t =
 type alert = {kind:string; message:string; def:loc; use:loc}
 
 let number = function
-  | Property_change _ -> 104
-  | Bad_witness_for_abstract_type _ -> 108
-  | Not_a_global_type _ -> 110
   | Comment_start -> 1
   | Comment_not_end -> 2
   | Fragile_match _ -> 4
@@ -193,8 +187,7 @@ let number = function
   | Missing_mli -> 70
 ;;
 
-let last_ocaml_warning_number = 70
-let last_warning_number = 110
+let last_warning_number = 70
 ;;
 
 (* Third component of each tuple is the list of names for each warning. The
@@ -356,13 +349,7 @@ let descriptions =
     69, "Unused record field.",
     ["unused-field"];
     70, "Missing interface file.",
-    ["missing-mli"];
-    104, "Different type properties.",
-    [];
-    108, "Bad witness for abstract type.",
-    [];
-    110, "Not a global type",
-    [];
+    ["missing-mli"]
   ]
 ;;
 
@@ -379,10 +366,7 @@ let name_to_number =
 let letter = function
   | 'a' ->
      let rec loop i = if i = 0 then [] else i :: loop (i - 1) in
-     loop last_ocaml_warning_number
-  | '_' ->
-      let rec loop i = if i = 0 then [] else i :: loop (i - 1) in
-      loop last_warning_number
+     loop last_warning_number
   | 'b' -> []
   | 'c' -> [1; 2]
   | 'd' -> [3]
@@ -628,7 +612,7 @@ let parse_warnings s =
   let rec loop tokens i =
     if i >= String.length s then List.rev tokens else
     match s.[i] with
-    | 'A' .. 'Z' | 'a' .. 'z' | '_' ->
+    | 'A' .. 'Z' | 'a' .. 'z' ->
         loop (Letter(s.[i],None)::tokens) (i+1)
     | '+' -> loop_letter_num tokens Set (i+1)
     | '-' -> loop_letter_num tokens Clear (i+1)
@@ -748,12 +732,6 @@ let message = function
   | Missing_record_field_pattern s ->
       "the following labels are not bound in this record pattern:\n" ^ s ^
       "\nEither bind these labels explicitly or add '; _' to the pattern."
-  | Property_change (s, _, _) ->
-      "different type properties for type " ^ s
-  | Bad_witness_for_abstract_type s ->
-      "bad witness for abstract type " ^ s
-  | Not_a_global_type s ->
-      Printf.sprintf "runtime type %s does not have a global name" s
   | Non_unit_statement ->
       "this expression should have type unit."
   | Redundant_case -> "this match case is unused."
@@ -989,20 +967,11 @@ let report w =
   | false -> `Inactive
   | true ->
      if is_error w then incr nerrors;
-      let sub_locs =
-        match w with
-        | Property_change (_, def, use) ->
-            [
-              def, "Definition";
-              use, "Expected signature";
-            ]
-        | _ -> []
-      in
      `Active
        { id = id_name w;
          message = message w;
          is_error = is_error w;
-         sub_locs;
+         sub_locs = [];
        }
 
 let report_alert (alert : alert) =
@@ -1071,6 +1040,9 @@ let help_warnings () =
   done;
   exit 0
 ;;
+
+let () =
+  parse_alert_option "-missed_punning"
 
 (* merlin *)
 

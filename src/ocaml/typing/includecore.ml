@@ -706,7 +706,8 @@ let type_declarations ?equality ~loc env ~mark name decl1 path decl2 =
         Format.printf "decl2 = %a@." (Printtyp.type_declaration (Ident.create_local name)) decl2;
         List.iter (fun {Parsetree.attr_name={txt}} -> Format.printf "  %s@." txt) decl2.type_attributes;
 *)
-        Location.prerr_warning loc (Warnings.Property_change (name, decl1.type_loc, decl2.type_loc));
+        Location.alert ~def:decl1.type_loc ~use:decl2.type_loc ~kind:"property_change" loc
+          ("Different type properties for type " ^ name);
       end;
       Misc.try_finally
         (fun () -> type_declarations ?equality ~loc env ~mark name decl1 path decl2)

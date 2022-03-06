@@ -47,6 +47,9 @@ let is_lazy_let e =
 let remove_lazy_attr =
   List.filter (function {attr_name={txt="mlfi.lazy"};_} -> false | _ -> true)
 
+let missed_punning loc =
+  Location.alert ~kind:"missed_punning" loc "Missed punning opportunity."
+
 type type_forcing_context =
   | If_conditional
   | If_no_else_branch
@@ -2046,6 +2049,13 @@ and type_pat_aux
           Some (p0, p, principal), ty
         with Not_found -> None, newvar ()
       in
+      List.iter
+        (function (lab, {ppat_loc = loc; ppat_desc = Ppat_var x})
+          when x.txt = Longident.last lab.txt && not lab.loc.loc_ghost ->
+            missed_punning loc
+                | _ -> ()
+        )
+        lid_sp_list;
       let type_label_pat (label_lid, label, sarg) k =
         let ty_arg =
           solve_Ppat_record_field ~refine loc env label label_lid record_ty in
@@ -3442,6 +3452,14 @@ and type_expect_
         | [] -> ()
       in
       check_duplicates lbl_exp_list;
+      List.iter
+        (function (lab, {pexp_loc = loc; pexp_desc = Pexp_ident {txt=Longident.Lident x}})
+          when x = Longident.last lab.txt && not loc.loc_ghost ->
+            missed_punning loc
+                | _ -> ()
+        )
+        lid_sexp_list;
+
       let opt_exp, label_definitions =
         let (_lid, lbl, _lbl_exp) = List.hd lbl_exp_list in
         let matching_label lbl =
