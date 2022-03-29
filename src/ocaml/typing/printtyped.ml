@@ -437,6 +437,8 @@ and expression i ppf x =
   | Texp_pack me ->
       line i ppf "Texp_pack";
       module_expr i ppf me
+  | Texp_typath _l ->
+      line i ppf "Pexp_typath ..."
   | Texp_letop {let_; ands; param = _; body; partial = _} ->
       line i ppf "Texp_letop";
       binding_op (i+1) ppf let_;

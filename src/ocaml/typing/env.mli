@@ -59,6 +59,8 @@ type t
 val empty: t
 val initial_safe_string: t
 val initial_unsafe_string: t
+val initial_with_auto_fwd: (unit -> t) ref
+val initial_with_auto: unit -> t (* LEXIFI *)
 val diff: t -> t -> Ident.t list
 
 type type_descr_kind =
@@ -365,7 +367,7 @@ val enter_signature: ?mod_shape:Shape.t -> scope:int -> signature -> t ->
 (* Same as [enter_signature] but also extends the shape map ([parent_shape])
    with all the the items from the signature, their shape being a projection
    from the given shape. *)
-val enter_signature_and_shape: scope:int -> parent_shape:Shape.Map.t ->
+val enter_signature_and_shape: ?root:string (* LEXIFI *) -> scope:int -> parent_shape:Shape.Map.t ->
   Shape.t -> signature -> t -> signature * Shape.Map.t * t
 
 val enter_unbound_value : string -> value_unbound_reason -> t -> t
@@ -451,6 +453,8 @@ val set_value_used_callback:
     value_description -> (unit -> unit) -> unit
 val set_type_used_callback:
     type_declaration -> ((unit -> unit) -> unit) -> unit
+
+val store_value: Ident.t -> value_description -> t -> t (* LEXIFI *)
 
 (* Forward declaration to break mutual recursion with Includemod. *)
 val check_functor_application:

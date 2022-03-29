@@ -150,6 +150,7 @@ val instance_list: type_expr list -> type_expr list
         (* Take an instance of a list of type schemes *)
 val new_local_type:
         ?loc:Location.t ->
+        ?type_attributes:Parsetree.attribute list ->
         ?manifest_and_scope:(type_expr * int) -> unit -> type_declaration
 val existential_name: constructor_description -> type_expr -> string
 val instance_constructor:
@@ -424,4 +425,3 @@ val package_subtype :
 
 (* Raises [Incompatible] *)
 val mcomp : Env.t -> type_expr -> type_expr -> unit
-

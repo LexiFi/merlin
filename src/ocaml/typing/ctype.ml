@@ -995,9 +995,9 @@ let rec find_repr p1 =
   function
     Mnil ->
       None
-  | Mcons (Public, p2, ty, _, _) when Path.same p1 p2 ->
+  | Mcons (Public, p2, ty, _, rp, _) when Path.same p1 p2 && rp = !remove_props ->
       Some ty
-  | Mcons (_, _, _, _, rem) ->
+  | Mcons (_, _, _, _, _, rem) ->
       find_repr p1 rem
   | Mlink {contents = rem} ->
       find_repr p1 rem
@@ -1015,12 +1015,15 @@ let rec find_repr p1 =
 let abbreviations = ref (ref Mnil)
   (* Abbreviation memorized. *)
 
+let remove_props = Btype.remove_props
+
 (* partial: we may not wish to copy the non generic types
    before we call type_pat *)
 let rec copy ?partial ?keep_names scope ty =
   let copy = copy ?partial ?keep_names scope in
   match get_desc ty with
     Tsubst (ty, _) -> ty
+  | Tprop (_, ty) when !remove_props -> copy ty
   | desc ->
     let level = get_level ty in
     if level <> generic_level && partial = None then ty else
@@ -1166,7 +1169,7 @@ let get_new_abstract_name s =
   if index = 0 && s <> "" && s.[String.length s - 1] <> '$' then s else
   Printf.sprintf "%s%d" s index
 
-let new_local_type ?(loc = Location.none) ?manifest_and_scope () =
+let new_local_type ?(loc = Location.none) ?(type_attributes = []) ?manifest_and_scope () =
   let manifest, expansion_scope =
     match manifest_and_scope with
       None -> None, Btype.lowest_level
@@ -1183,7 +1186,7 @@ let new_local_type ?(loc = Location.none) ?manifest_and_scope () =
     type_is_newtype = true;
     type_expansion_scope = expansion_scope;
     type_loc = loc;
-    type_attributes = [];
+    type_attributes;
     type_immediate = Unknown;
     type_unboxed_default = false;
     type_uid = Uid.mk ~current_unit:(Env.get_unit_name ());
@@ -1334,7 +1337,7 @@ let rec copy_sep ~cleanup_scope ~fixed ~free ~bound ~may_share
       match desc with
         Tarrow _ | Ttuple _ | Tvariant _ | Tconstr _ | Tobject _ | Tpackage _ ->
           (get_id ty, (t, bound)) :: visited
-      | Tvar _ | Tfield _ | Tnil | Tpoly _ | Tunivar _ ->
+      | Tvar _ | Tfield _ | Tnil | Tpoly _ | Tunivar _ | Tprop _ ->
           visited
       | Tlink _ | Tsubst _ ->
           assert false
@@ -1635,7 +1638,7 @@ let rec extract_concrete_typedecl env ty =
                 | May_have_typedecl -> May_have_typedecl
           end
       end
-  | Tpoly(ty, _) -> extract_concrete_typedecl env ty
+  | Tpoly(ty, _) | Tprop (_, ty) -> extract_concrete_typedecl env ty
   | Tarrow _ | Ttuple _ | Tobject _ | Tfield _ | Tnil
   | Tvariant _ | Tpackage _ -> Has_no_typedecl
   | Tvar _ | Tunivar _ -> May_have_typedecl
@@ -2038,7 +2041,7 @@ let reify_univars env ty =
 let rec has_cached_expansion p abbrev =
   match abbrev with
     Mnil                    -> false
-  | Mcons(_, p', _, _, rem) -> Path.same p p' || has_cached_expansion p rem
+  | Mcons(_, p', _, _, rp, rem) -> (rp = !remove_props && Path.same p p') || has_cached_expansion p rem
   | Mlink rem               -> has_cached_expansion p !rem
 
 (**** Transform error trace ****)
@@ -4033,6 +4036,17 @@ let rec eqtype rename type_pairs subst env t1 t2 =
                 (eqtype rename type_pairs subst env)
           | (Tunivar _, Tunivar _) ->
               unify_univar_for Equality t1' t2' !univar_pairs
+
+
+          | (Tprop (p1, t1), Tprop (p2, t2)) when p1 = p2 ->
+              eqtype rename type_pairs subst env t1 t2
+
+                (* Remove the next two lines to get a strict semantics
+                   for type equality with properties. *)
+          | Tprop (_p, t1), _ when not !Clflags.strict_props -> eqtype rename type_pairs subst env t1 t2
+          | _, Tprop (_p, t2) when not !Clflags.strict_props -> eqtype rename type_pairs subst env t1 t2
+
+
           | (_, _) ->
               raise_unexplained_for Equality
         end
@@ -4679,6 +4693,8 @@ let rec build_subtype env (visited : transient_expr list)
       else (t, Unchanged)
   | Tunivar _ | Tpackage _ ->
       (t, Unchanged)
+  | Tprop _ ->
+      assert false
 
 let enlarge_type env ty =
   warn := false;
@@ -4708,6 +4724,8 @@ let subtype_error ~env ~trace ~unification_trace =
   raise (Subtype (Subtype.error
                     ~trace:(expand_subtype_trace env (List.rev trace))
                     ~unification_trace))
+
+let subtypes_constrs = ref []
 
 let rec subtype_rec env trace t1 t2 cstrs =
   if eq_type t1 t2 then cstrs else
@@ -4751,9 +4769,13 @@ let rec subtype_rec env trace t1 t2 cstrs =
               let (co, cn) = Variance.get_upper v in
               if co then
                 if cn then
+                  if !Clflags.pure_caml then
                   (trace, newty2 ~level:(get_level t1) (Ttuple[t1]),
                    newty2 ~level:(get_level t2) (Ttuple[t2]), !univar_pairs)
                   :: cstrs
+                  else
+                  subtype_rec env (Subtype.Diff {got = t1; expected = t2} :: trace) t2 t1
+                    (subtype_rec env (Subtype.Diff {got = t1; expected = t2} :: trace) t1 t2 cstrs)
                 else
                   subtype_rec
                     env
@@ -4802,6 +4824,82 @@ let rec subtype_rec env trace t1 t2 cstrs =
         with Escape _ ->
           (trace, t1, t2, !univar_pairs)::cstrs
         end
+
+  (* BEGIN LEXIFI *)
+    | (Tconstr(p1, tl1, _), Tconstr(p2, tl2, _)) when not !Clflags.pure_caml ->
+        begin try
+          let (_, _, t1', t2') =
+            List.find (fun (p1', p2', _, _) -> Path.same p1 p1' && Path.same p2 p2') !subtypes_constrs
+          in
+          (trace, t1, t1', !univar_pairs) :: (trace, t2, t2', !univar_pairs) :: cstrs
+        with Not_found ->
+          let old = !subtypes_constrs in
+          subtypes_constrs := (p1, p2, t1, t2) :: !subtypes_constrs;
+          try
+            let decl1 = Env.find_type p1 env in
+            let decl2 = Env.find_type p2 env in
+            if decl2.type_private = Private then raise Not_found;
+            let cmp_records cstrs fields1 fields2 =
+              if List.length fields1 <> List.length fields2 then raise Not_found;
+              List.fold_left2
+                (fun cstrs l1 l2 ->
+                   if Ident.name l1.ld_id <> Ident.name l2.ld_id
+                   || l1.ld_mutable <> l2.ld_mutable
+                   || (l1.ld_mutable = Mutable && decl1.type_private = Private) then
+                     raise Not_found;
+                   let t1 = apply env decl1.type_params l1.ld_type tl1 in
+                   let t2 = apply env decl2.type_params l2.ld_type tl2 in
+                   let cstrs = subtype_rec env (Subtype.Diff {got = t1; expected = t2} :: trace) t1 t2 cstrs in
+                   if l1.ld_mutable = Mutable then
+                     subtype_rec env (Subtype.Diff {got = t2; expected = t1} :: trace) t2 t1 cstrs
+                   else
+                     cstrs
+                )
+                cstrs fields1 fields2
+            in
+            let cstrs =
+              match decl1.type_kind, decl2.type_kind with
+              | Type_record (fields1, r1), Type_record (fields2, r2) when
+                  r1 = r2 ->
+                  cmp_records cstrs fields1 fields2
+
+              | Type_variant (constrs1, _), Type_variant (constrs2, _)
+                when List.length constrs1 = List.length constrs2 ->
+                  List.fold_left2
+                    (fun cstrs c1 c2 ->
+                      (* do something with usage marks? *)
+                      if Ident.name c1.cd_id <> Ident.name c2.cd_id || c1.cd_res <> None || c2.cd_res <> None then
+                        raise Not_found;
+                      match c1.cd_args, c2.cd_args with
+                      | Cstr_tuple args1, Cstr_tuple args2 when
+                          List.length args1 = List.length args2 ->
+
+                          List.fold_left2
+                            (fun cstrs t1 t2 ->
+                               let t1 = apply env decl1.type_params t1 tl1 in
+                               let t2 = apply env decl2.type_params t2 tl2 in
+                               subtype_rec env (Subtype.Diff {got = t1; expected = t2} :: trace) t1 t2 cstrs
+                            ) cstrs args1 args2
+
+                      | Cstr_record fields1, Cstr_record fields2 ->
+                          cmp_records cstrs fields1 fields2
+
+                      | _ -> raise Not_found
+                    )
+                    cstrs constrs1 constrs2
+              | _ -> raise Not_found
+            in
+            subtypes_constrs := old;
+            cstrs
+          with
+          | Not_found ->
+              subtypes_constrs := old;
+              (trace, t1, t2, !univar_pairs)::cstrs
+          | exn ->
+              subtypes_constrs := old;
+              raise exn
+        end
+(* END LEXIFI *)
     | (Tpackage (p1, fl1), Tpackage (p2, fl2)) ->
         begin try
           let ntl1 =

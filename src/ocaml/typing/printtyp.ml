@@ -465,7 +465,7 @@ let rec safe_repr v t =
 
 let rec list_of_memo = function
     Mnil -> []
-  | Mcons (_priv, p, _t1, _t2, rem) -> p :: list_of_memo rem
+  | Mcons (_priv, p, _t1, _t2, _, rem) -> p :: list_of_memo rem
   | Mlink rem -> list_of_memo !rem
 
 let print_name ppf = function
@@ -537,6 +537,9 @@ and raw_type_desc ppf = function
   | Tpackage (p, fl) ->
       fprintf ppf "@[<hov1>Tpackage(@,%a@,%a)@]" path p
         raw_type_list (List.map snd fl)
+  | Tprop (_, ty) ->
+      fprintf ppf "@[<hov1>Tprop(@,_@,%a)@]"
+        raw_type ty
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"
 | Some Types.Fixed_private -> fprintf ppf "Some Fixed_private"
@@ -1132,6 +1135,10 @@ let rec tree_of_typexp mode ty =
               tree_of_typexp mode ty
             )) fl in
         Otyp_module (tree_of_path Module_type p, fl)
+    | Tprop (props, ty) ->
+        Otyp_attribute
+          (tree_of_typexp mode ty,
+           {oattr_name="t " ^ String.concat "; " (List.map (function (k, "") -> k | (k, v) -> Printf.sprintf "%s=%S" k v) props)})
   in
   if List.memq px !delayed then delayed := List.filter ((!=) px) !delayed;
   if is_aliased_proxy px && aliasable ty then begin
@@ -1518,6 +1525,13 @@ let tree_of_value_description id decl =
     | Val_prim p -> Primitive.print p vd
     | _ -> vd
   in
+  (* BEGIN LEXIFI *)
+  let vd =
+    match Types.val_approx decl with
+    | Some s -> {vd with oval_prims = [ Printf.sprintf "=%s" s ]}
+    | None -> vd
+  in
+  (* END LEXIFI *)
   Osig_value vd
 
 let value_description id ppf decl =
