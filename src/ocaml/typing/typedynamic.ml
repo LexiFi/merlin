@@ -349,16 +349,12 @@ let stype_of_type env loc ty =
         | {type_kind = Type_abstract; type_manifest = None} ->
             begin try
               let vpath, vd = Env.find_value_by_name ~use:true (Untypeast.lident_of_path path) env in
-              let ttype t =
-                let p, _ = Env.find_type_by_name ~use:true (Longident.parse "Mlfi_types.ttype") env in
-                Ctype.newty (Tconstr (p, [t], ref Mnil))
-              in
               let et =
                 List.fold_right
                   (fun arg res ->
-                     Ctype.newty (Tarrow (Nolabel, ttype arg, res, commu_ok))
+                     Ctype.newty (Tarrow (Nolabel, Predef.type_ttype arg, res, commu_ok))
                   )
-                  tys (ttype t)
+                  tys (Predef.type_ttype t)
               in
               let et = Ctype.correct_levels et in
               let ok =
