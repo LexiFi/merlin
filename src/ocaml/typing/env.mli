@@ -254,9 +254,9 @@ val lookup_instance_variable:
   Path.t * Asttypes.mutable_flag * string * type_expr
 
 val find_value_by_name:
-  Longident.t -> t -> Path.t * value_description
+  ?use:bool -> Longident.t -> t -> Path.t * value_description
 val find_type_by_name:
-  Longident.t -> t -> Path.t * type_declaration
+  ?use:bool -> Longident.t -> t -> Path.t * type_declaration
 val find_module_by_name:
   Longident.t -> t -> Path.t * module_declaration
 val find_modtype_by_name:

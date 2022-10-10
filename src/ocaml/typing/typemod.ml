@@ -2938,7 +2938,7 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
         (* BEGIN LEXIFI *)
         let root =
           match modl.mod_desc with
-          | Tmod_ident (p, _) -> Typecore.full_name_mod env p
+          | Tmod_ident (p, _) -> Typedynamic.full_name_mod env p
           | _ -> "*INCLUDED*"
         in
         (* END LEXIFI *)
@@ -3170,47 +3170,10 @@ let () =
   Typeclass.type_open_descr := type_open_descr;
   type_module_type_of_fwd := type_module_type_of
 
-(* BEGIN LEXIFI *)
-(* Compute a global name for module bindings and type declarations *)
-let root_attr s =
-  [Ast_helper.Attr.mk (Location.mknoloc "#root#")
-     (Parsetree.PTyp (Ast_helper.Typ.var s))]
-
-let assign_global_names unit =
-  let open Ast_mapper in
-  let rec mapper path =
-    let super = default_mapper in
-    let module_binding _m pmb =
-      let m = mapper (path ^ "." ^ Option.value ~default:"*_*" pmb.pmb_name.txt) in
-      let pmb = super.module_binding m pmb in
-      {pmb with pmb_attributes = pmb.pmb_attributes @ root_attr path}
-    in
-    let type_declaration _m td =
-      {td with ptype_attributes = td.ptype_attributes @ root_attr path}
-    in
-    let expr m e =
-      match e.pexp_desc with
-      | Pexp_letmodule ({txt}, _me, _expr) ->
-          let m = mapper ("*LOCAL*." ^ Option.value ~default:"*_*" txt) in
-          super.expr m e
-      | _ ->
-          super.expr m e
-    in
-    {super with module_binding; type_declaration; expr}
-  in
-  mapper unit
-(* END LEXIFI *)
-
 
 (* Typecheck an implementation file *)
 
 let type_implementation sourcefile outputprefix modulename initial_env ast =
-  (* BEGIN LEXIFI *)
-  let ast =
-    let map = assign_global_names (Env.get_unit_name ()) in
-    map.Ast_mapper.structure map ast
-  in
-  (* END LEXIFI *)
   Cmt_format.clear ();
   Misc.try_finally (fun () ->
       Typecore.reset_delayed_checks ();

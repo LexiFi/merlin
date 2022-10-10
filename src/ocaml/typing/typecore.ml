@@ -378,11 +378,6 @@ let has_implicit ty =
   | Auto_ttype _ | Auto_call_site -> true
   | Auto_none -> false
 
-let is_ttype ty =
-  match classify_auto_type ty with
-  | Auto_ttype r -> Some r
-  | _ -> None
-
 let rec copy_known_part ty =
   match get_desc ty with
   | Tconstr (p, tl, abbrev) ->
@@ -2489,16 +2484,6 @@ let force_delayed_checks () =
   reset_delayed_checks ();
   Btype.backtrack snap
 
-let delayed_checks_after_dyntypes = ref []
-let reset_delayed_checks_after_dyntypes () = delayed_checks_after_dyntypes := []
-let add_delayed_check_after_dyntypes f = delayed_checks_after_dyntypes := (f, Warnings.backup ()) :: !delayed_checks_after_dyntypes
-let force_delayed_checks_after_dyntypes () =
-  let w_old = Warnings.backup () in
-  List.iter (fun (f, w) -> Warnings.restore w;
-             try f () with exn -> Msupport.raise_error exn) (List.rev !delayed_checks_after_dyntypes);
-  Warnings.restore w_old;
-  reset_delayed_checks_after_dyntypes ()
-
 let rec final_subexpression exp =
   match exp.exp_desc with
     Texp_let (_, _, e)
@@ -3072,11 +3057,6 @@ let unify_exp env exp expected_ty =
     unify_exp_types loc env exp.exp_type expected_ty
   with Error(loc, env, Expr_type_clash(err, tfc, None)) ->
     raise (Error(loc, env, Expr_type_clash(err, tfc, Some exp.exp_desc)))
-
-let ttype_of ~loc sty =
-  let open Ast_helper.Exp in
-  apply ~loc (ident ~loc (mkloc (Longident.parse "Mlfi_types.internal_ttype_of") loc))
-    [Nolabel, constraint_ ~loc (assert_ ~loc (construct ~loc (mkloc (Longident.Lident "false") loc) None)) sty]
 
 (* If [is_inferred e] is true, [e] will be typechecked without using
    the "expected type" provided by the context. *)
@@ -4205,7 +4185,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
       }
   | Pexp_extension ({txt="t"|"lexifi.t"}, PTyp sty) ->
-      type_expect env (ttype_of ~loc sty) ty_expected_explained
+      type_expect env (Typedynamic.ttype_of ~loc sty) ty_expected_explained
   | Pexp_extension ({txt="fields_of"}, PTyp sty) ->
       let ty = (Typetexp.transl_simple_type env false sty).ctyp_type in
       let ty = Ctype.expand_head env ty in
@@ -5851,7 +5831,7 @@ and type_let ?(lazy_flag = NonLazy) ?bind
                   let name = Ident.name id in
                   let used = ref false in
                   if not (name = "" || name.[0] = '_' || name.[0] = '#') then
-                    add_delayed_check_after_dyntypes
+                    add_delayed_check
                       (fun () ->
                          if not !used then
                            Location.prerr_warning vd.Types.val_loc
@@ -6000,7 +5980,7 @@ and type_implicit_arg env loc ty =
 
   match classify_auto_type ty with
   | Auto_ttype t ->
-      let e = type_expect env (ttype_of ~loc:ghloc (Ast_helper.Typ.any ())) (mk_expected ty) in
+      let e = type_expect env (Typedynamic.ttype_of ~loc:ghloc (Ast_helper.Typ.any ())) (mk_expected ty) in
       begin match get_desc t, !level_for_implicit_ttype with
       | Tvar _, None -> unify_exp env e (new_global_var ())
       | Tvar _, Some level -> unify_exp env e (newty2 ~level (Tvar None))
@@ -6107,78 +6087,6 @@ let type_expression env sexp =
       let (_path, desc) = Env.lookup_value ~use:false ~loc lid.txt env in
       {exp with exp_type = desc.val_type}
   | _ -> exp
-
-(* BEGIN LEXIFI *)
-(* Naming of types for runtime representations *)
-let builtin_type =
-  let tbl = Hashtbl.create 16 in
-  List.iter
-    (fun (_, id) -> Hashtbl.add tbl id ())
-    Predef.builtin_idents;
-  Hashtbl.mem tbl
-
-let ident_stdlib = Ident.create_persistent "Stdlib"
-
-let rec full_name_mod env path =
-  let open Parsetree in
-  let open Path in
-  let path = Env.normalize_module_path (Some Location.none) env path in
-  let path = Printtyp.rewrite_double_underscore_paths env path in
-  match path with
-  | Pident id ->
-      if Ident.persistent id then Ident.name id
-      else begin try
-          let md = Env.find_module path env in
-          let root =
-            List.fold_left
-              (fun root -> function
-                 | {attr_name = {txt="#localmodule#"; _}; _} -> "*LOCAL*"
-                 | {attr_name = {txt="#funarg#"; _}; _} -> "*FUNARG*"
-                 | {attr_name = {txt="#root#"; _};
-                    attr_payload = PTyp {ptyp_desc=Ptyp_var s}; _} -> s
-                 | _ -> root
-              ) "*UNKNOWN*" md.md_attributes
-          in
-          root ^ "." ^ Ident.name id
-        with Not_found ->
-          Printf.sprintf "*?*.%s" (Path.name path)
-      end
-  | Pdot (Pident id, s) when Ident.same id ident_stdlib ->
-      s
-  | Pdot (p, s) ->
-      full_name_mod env p ^ "." ^ s
-  | Papply(m1, m2) ->
-      Printf.sprintf "%s(%s)"
-        (full_name_mod env m1)
-        (full_name_mod env m2)
-
-let full_name_typ env path =
-  let open Parsetree in
-  let open Path in
-  match path with
-  | Pident id when builtin_type id ->
-      Ident.name id
-  | Pident id ->
-      begin try
-        let td = Env.find_type path env in
-        let root =
-          List.fold_left
-            (fun root -> function
-               | {attr_name = {txt="#root#"; _};
-                  attr_payload = PTyp {ptyp_desc=Ptyp_var s}; _} -> s
-               | {attr_name = {txt="#localtype#"; _}; _} -> "*LOCAL*"
-               | _ -> root
-            ) "*UNKNOWN*" td.type_attributes
-        in
-        root ^ "." ^ Ident.name id
-      with Not_found ->
-        Printf.sprintf "*?*.%s" (Path.name path)
-      end
-  | Pdot (p, s) ->
-      full_name_mod env p ^ "." ^ s
-  | Papply _ ->
-      assert false
-(* END LEXIFI *)
 
 (* Error report *)
 
@@ -6689,8 +6597,8 @@ let () =
     )
 
 let () =
-  Persistent_env.add_delayed_check_forward := add_delayed_check_after_dyntypes;
-  Env.add_delayed_check_forward := add_delayed_check_after_dyntypes;
+  Persistent_env.add_delayed_check_forward := add_delayed_check;
+  Env.add_delayed_check_forward := add_delayed_check;
   ()
 
 (* drop ?recarg argument from the external API *)

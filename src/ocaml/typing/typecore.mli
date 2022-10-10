@@ -141,10 +141,6 @@ val delayed_checks: delayed_check list ref
 val reset_delayed_checks: unit -> unit
 val force_delayed_checks: unit -> unit
 
-val add_delayed_check_after_dyntypes: (unit -> unit) -> unit
-val reset_delayed_checks_after_dyntypes: unit -> unit
-val force_delayed_checks_after_dyntypes: unit -> unit
-
 val name_pattern : string -> Typedtree.pattern list -> Ident.t
 val name_cases : string -> Typedtree.value Typedtree.case list -> Ident.t
 
@@ -254,9 +250,6 @@ val type_package:
   (Env.t -> Parsetree.module_expr -> Path.t -> (Longident.t * type_expr) list ->
   Typedtree.module_expr * (Longident.t * type_expr) list) ref
 
-val is_ttype: type_expr -> type_expr option  (* LEXIFI *)
-val full_name_mod: Env.t -> Path.t -> string (* LEXIFI *)
-val full_name_typ: Env.t -> Path.t -> string (* LEXIFI *)
 val has_implicit: type_expr -> bool          (* LEXIFI *)
 
 val constant: Parsetree.constant -> (Asttypes.constant, error) result
