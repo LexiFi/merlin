@@ -2,19 +2,19 @@
 
 (library
   (name ocaml_preprocess)
-  (public_name merlin.preprocess)
-  (flags -open Ocaml_parsing -open Ocaml_utils -open Merlin_utils)
+  (public_name merlin-lib.ocaml_preprocess)
+  (flags :standard -open Ocaml_parsing -open Ocaml_utils -open Merlin_utils)
   (libraries ocaml_parsing ocaml_utils merlin_utils))
 
 (menhir
  (modules parser_raw)
- (enabled_if (<> %{profile} "release"))
+ (enabled_if false)
  (mode    promote)
  (flags :standard --inspection --table --cmly))
 
 (rule
   (targets parser_recover.ml)
-  (enabled_if (<> %{profile} "release"))
+  (enabled_if false)
   (deps    parser_raw.cmly)
   (mode    promote)
   (action
@@ -23,7 +23,7 @@
 
 (rule
   (targets parser_explain.ml)
-  (enabled_if (<> %{profile} "release"))
+  (enabled_if false)
   (deps    parser_raw.cmly)
   (mode    promote)
   (action
@@ -32,7 +32,7 @@
 
 (rule
   (targets parser_printer.ml)
-  (enabled_if (<> %{profile} "release"))
+  (enabled_if false)
   (deps    parser_raw.cmly)
   (mode    promote)
   (action
