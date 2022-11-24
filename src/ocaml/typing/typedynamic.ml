@@ -477,7 +477,7 @@ let ttype_of ~loc sty =
   let num = incr stype_num; !stype_num in
   Exp.apply ~loc (Exp.ident (Location.mknoloc (Longident.parse "Mlfi_types.internal_ttype_of")))
     [ Nolabel, Exp.constant (Const.int num);
-      Nolabel, Exp.constraint_ (Exp.assert_ ~loc:sty.Parsetree.ptyp_loc (Exp.construct (Location.mknoloc (Longident.Lident "false")) None)) sty]
+      Nolabel, Exp.constraint_ ~loc (Exp.assert_ ~loc (Exp.construct ~loc (Location.mknoloc (Longident.Lident "false")) None)) sty]
 
 let reset () =
   Hashtbl.reset !stype_tbl;
