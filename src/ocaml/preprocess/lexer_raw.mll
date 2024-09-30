@@ -388,6 +388,7 @@ let hex_float_literal =
   ('.' ['0'-'9' 'A'-'F' 'a'-'f' '_']* )?
   (['p' 'P'] ['+' '-']? ['0'-'9'] ['0'-'9' '_']* )?
 let literal_modifier = ['G'-'Z' 'g'-'z']
+let raw_ident_escape = "\\#"
 
 
 refill {fun k lexbuf -> Refill (fun () -> k lexbuf)}
@@ -422,6 +423,8 @@ rule token state = parse
       { fail lexbuf
           (Reserved_sequence (".~", Some "is reserved for use in MetaOCaml")) }
       *)
+  | "~" raw_ident_escape (lowercase identchar * as name) ':'
+      { return (LABEL name) }
   | "~" (lowercase identchar * as name) ':'
       { lABEL (check_label_name lexbuf name) }
   | "~" (lowercase_latin1 identchar_latin1 * as name) ':'
@@ -429,10 +432,17 @@ rule token state = parse
         return (LABEL name) }
   | "?"
       { return QUESTION }
+  | "?" raw_ident_escape (lowercase identchar * as name) ':'
+      { return (OPTLABEL name) }
   | "?" (lowercase identchar * as name) ':'
       { oPTLABEL (check_label_name lexbuf name) }
   | "?" (lowercase_latin1 identchar_latin1 * as name) ':'
       { warn_latin1 lexbuf; return (OPTLABEL name) }
+  | raw_ident_escape (lowercase identchar * as name)
+      { return (LIDENT name) }
+  | "effect" as name (* LEXIFI *)
+      { Location.alert ~kind:"future-keyword" (Location.curr lexbuf) "identifier will become keyword in 5.3";
+        return (LIDENT name) }
   | lowercase identchar * as name
     { return (try Hashtbl.find state.keywords name
               with Not_found ->
@@ -507,7 +517,7 @@ rule token state = parse
     { char_for_decimal_code state lexbuf 2 >>= fun c -> return (CHAR c) }
   | "\'\\" 'x' ['0'-'9' 'a'-'f' 'A'-'F'] ['0'-'9' 'a'-'f' 'A'-'F'] "\'"
     { return (CHAR (char_for_hexadecimal_code lexbuf 3)) }
-  | "\'" ("\\" _ as esc)
+  | "\'" ("\\" [^ '#'] as esc)
       { fail lexbuf (Illegal_escape (esc, None)) }
   | "(*"
       { let start_loc = Location.curr lexbuf in
