@@ -299,11 +299,10 @@ let stype_of_type env loc ty =
     | Tconstr(path, [], _) when path_is_contract path -> DT_abstract ("Mlfi_contract.contract", [])
     | Tconstr(path, [ty], _) when path_is_observable path -> DT_abstract ("Mlfi_contract.observable", [dyn ~warn rec_types ty])
     | Tconstr(path, tys, _) ->
-        let s = Path.name path in
         let decl =
           try Env.find_type path env
           with Not_found ->
-            errstr loc ty ("cannot find definition for " ^ s)
+            errstr loc ty ("cannot find definition for " ^ Path.name path)
         in
 
         let props = List.flatten (Ast_helper.get_str_props decl.type_attributes) in
@@ -314,8 +313,18 @@ let stype_of_type env loc ty =
             (fun () -> Ctype.apply env decl.type_params ty tys)
         in
 
+        let force_abstract =
+          List.exists (fun {Parsetree.attr_name = {txt; _}; _} -> txt = "mlfi.abstract") decl.type_attributes
+        in
         let abstract_dynamic =
           List.exists (fun {Parsetree.attr_name = {txt; _}; _} -> txt = "mlfi.abstract_dynamic") decl.type_attributes
+        in
+        let is_real_abstract = decl.type_kind = Type_abstract in
+        let decl =
+          match decl.type_kind, force_abstract  with
+          | _, true -> {decl with type_kind = Type_abstract; type_manifest = None}
+          | Type_open, _ -> {decl with type_kind = Type_abstract} (* handle extensible sum types as abstract ones *)
+          | _ -> decl
         in
         let type_name kind =
           match decl with
@@ -323,9 +332,9 @@ let stype_of_type env loc ty =
               (* This is used e.g. for type Ib_stdlib.variant, defined as Mlfi_isdatypes.variant, with constructors
                  exported. *)
               begin match get_desc (typexp body) with
-              | Tconstr(path, _, _) -> Path.name path
+              | Tconstr(path, _, _) -> path_name ~warn Abstract loc env path
               | _ ->
-                  errstr loc ty ("dynamic-abstract type does not expand to path name: " ^ s)
+                  errstr loc ty ("dynamic-abstract type does not expand to path name: " ^ Path.name path)
               end
           | _ ->
               path_name ~warn kind loc env path
@@ -348,6 +357,7 @@ let stype_of_type env loc ty =
         match decl with
         | {type_kind = Type_abstract; type_manifest = None} ->
             begin try
+              if not is_real_abstract then raise Not_found;
               let vpath, vd = Env.find_value_by_name ~use:true (Untypeast.lident_of_path path) env in
               let ttype t =
                 let p, _ = Env.find_type_by_name ~use:true (Longident.Ldot (Lident "Stdlib", "ttype")) env in
@@ -384,8 +394,8 @@ let stype_of_type env loc ty =
             begin match get_desc (typexp body) with
             | Tconstr(path, tys, _) ->
                 let ttys = List.map (dyn ~warn rec_types) tys in
-                DT_abstract (Path.name path, ttys)
-            | _ -> errstr loc ty ("dynamic-abstract type does not expand to path name: " ^ s)
+                DT_abstract (path_name ~warn Abstract loc env path, ttys)
+            | _ -> errstr loc ty ("dynamic-abstract type does not expand to path name: " ^ Path.name path)
             end
         | {type_kind = Type_abstract; type_manifest = Some body} ->
             assert (not abstract_dynamic);
@@ -433,8 +443,8 @@ let stype_of_type env loc ty =
               | Types.Record_float -> Record_float
               | _ -> assert false
             end
-        | {type_kind = Type_open} ->
-            DT_abstract (s, List.map (dyn ~warn rec_types) tys)
+        | {type_kind = _} ->
+            assert false (* turned into Type_abstract above *)
   in
   let r = dyn ~warn:true (0, []) ty in
   r, List.rev_map snd !used_types
