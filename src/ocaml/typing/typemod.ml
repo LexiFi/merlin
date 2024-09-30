@@ -2950,7 +2950,7 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
         (* BEGIN LEXIFI *)
         let root =
           match modl.mod_desc with
-          | Tmod_ident (p, _) -> Typedynamic.full_name_mod env p
+          | Tmod_ident (p, _) -> Typedynamic.full_name_mod ~lax:false env p
           | _ -> "*INCLUDED*"
         in
         (* END LEXIFI *)

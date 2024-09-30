@@ -52,10 +52,10 @@ let builtin_type =
 
 let ident_stdlib = Ident.create_persistent "Stdlib"
 
-let rec full_name_mod env path =
+let rec full_name_mod ~lax env path =
   let open Parsetree in
   let open Path in
-  let path = Env.normalize_module_path (Some Location.none) env path in
+  let path = Env.normalize_module_path (if lax then None else Some Location.none) env path in
   let path = Printtyp.rewrite_double_underscore_paths env path in
   match path with
   | Pident id ->
@@ -79,13 +79,13 @@ let rec full_name_mod env path =
   | Pdot (Pident id, s) when Ident.same id ident_stdlib ->
       s
   | Pdot (p, s) ->
-      full_name_mod env p ^ "." ^ s
+      full_name_mod ~lax env p ^ "." ^ s
   | Papply(m1, m2) ->
       Printf.sprintf "%s(%s)"
-        (full_name_mod env m1)
-        (full_name_mod env m2)
+        (full_name_mod ~lax env m1)
+        (full_name_mod ~lax env m2)
 
-let full_name_typ env path =
+let full_name_typ ~lax env path =
   let open Parsetree in
   let open Path in
   match path with
@@ -108,7 +108,7 @@ let full_name_typ env path =
         Printf.sprintf "*?*.%s" (Path.name path)
       end
   | Pdot (p, s) ->
-      full_name_mod env p ^ "." ^ s
+      full_name_mod ~lax env p ^ "." ^ s
   | Papply _ ->
       assert false
 
@@ -176,8 +176,13 @@ let path_is_observable path =
   Path.same path path_mlfi_contract_observable ||
   Path.same path path_mlfi_acontract_obs
 
-let path_name ~warn kind loc env path =
-  let s = full_name_typ env path in
+(* If [~lax] is [true], allow returning dangling paths (pointing to modules
+   without a corresponding .cmi). This is safe when all we want is the name of a
+   type to put inside a [DT_abstract], and enables certain linking tricks that
+   restrict the visible .cmi files. *)
+
+let path_name ~lax ~warn kind loc env path =
+  let s = full_name_typ ~lax env path in
   if warn && String.contains s '*' then warning loc (Not_a_global_type (kind, s));
   s
 
@@ -332,12 +337,12 @@ let stype_of_type env loc ty =
               (* This is used e.g. for type Ib_stdlib.variant, defined as Mlfi_isdatypes.variant, with constructors
                  exported. *)
               begin match get_desc (typexp body) with
-              | Tconstr(path, _, _) -> path_name ~warn Abstract loc env path
+              | Tconstr(path, _, _) -> path_name ~lax:true ~warn Abstract loc env path
               | _ ->
                   errstr loc ty ("dynamic-abstract type does not expand to path name: " ^ Path.name path)
               end
           | _ ->
-              path_name ~warn kind loc env path
+              path_name ~lax:false ~warn kind loc env path
         in
 
         let try_st_rec set f =
@@ -381,7 +386,7 @@ let stype_of_type env loc ty =
                 existing_type vpath
               end else begin
                 warning loc
-                  (Bad_witness_for_abstract_type (full_name_typ env path));
+                  (Bad_witness_for_abstract_type (full_name_typ ~lax:false env path));
                 raise Not_found;
               end
             with Not_found ->
@@ -394,7 +399,7 @@ let stype_of_type env loc ty =
             begin match get_desc (typexp body) with
             | Tconstr(path, tys, _) ->
                 let ttys = List.map (dyn ~warn rec_types) tys in
-                DT_abstract (path_name ~warn Abstract loc env path, ttys)
+                DT_abstract (path_name ~lax:true ~warn Abstract loc env path, ttys)
             | _ -> errstr loc ty ("dynamic-abstract type does not expand to path name: " ^ Path.name path)
             end
         | {type_kind = Type_abstract; type_manifest = Some body} ->

@@ -7,7 +7,7 @@
 
 val assign_global_names: Parsetree.structure -> Parsetree.structure
 
-val full_name_mod: Env.t -> Path.t -> string
+val full_name_mod: lax:bool -> Env.t -> Path.t -> string
 
 val illegal_dyn_use: Location.t -> 'a
 
