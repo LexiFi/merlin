@@ -1,5 +1,5 @@
 (***************************************************************************)
-(*  Copyright (C) 2000-2022 LexiFi SAS. All rights reserved.               *)
+(*  Copyright (C) 2000-2024 LexiFi SAS. All rights reserved.               *)
 (*                                                                         *)
 (*  No part of this document may be reproduced or transmitted in any       *)
 (*  form or for any purpose without the express permission of LexiFi SAS.  *)
@@ -192,6 +192,9 @@ let no_dynamic_type =
 let no_ttype_warning =
   "no_ttype_warning", ""
 
+let add_props attributes stype =
+  add_props (List.flatten (Ast_helper.get_str_props attributes)) stype
+
 let stype_of_type env loc ty =
 
   let memotbl = Hashtbl.create 16 in
@@ -365,7 +368,7 @@ let stype_of_type env loc ty =
               if not is_real_abstract then raise Not_found;
               let vpath, vd = Env.find_value_by_name ~use:true (Untypeast.lident_of_path path) env in
               let ttype t =
-                let p, _ = Env.find_type_by_name ~use:true (Longident.Ldot (Lident "Stdlib", "ttype")) env in
+                let p, _ = Env.find_type_by_name ~use:true (Longident.parse "Mlfi_types.ttype") env in
                 Ctype.newty (Tconstr (p, [t], ref Mnil))
               in
               let et =
@@ -425,7 +428,7 @@ let stype_of_type env loc ty =
                          let fields =
                            List.map
                              (fun {Types.ld_id=s; ld_type=t; ld_attributes} ->
-                                (Ident.name s, List.flatten (Ast_helper.get_str_props ld_attributes), dyn (typexp t))
+                                (Ident.name s, add_props ld_attributes (dyn (typexp t)))
                              ) fields
                          in
                          let node = Internal.create_node (Printf.sprintf "%s.%s" (type_name Concrete) c) [] in
@@ -441,7 +444,7 @@ let stype_of_type env loc ty =
             try_st_rec Internal.set_node_record begin fun dyn ->
               List.map
                 (fun {Types.ld_id=s; ld_type=t; ld_attributes} ->
-                   (Ident.name s, List.flatten (Ast_helper.get_str_props ld_attributes), dyn (typexp t))
+                   (Ident.name s, add_props ld_attributes (dyn (typexp t)))
                 ) fields,
               match repr with
               | Types.Record_regular -> Record_regular
@@ -509,7 +512,7 @@ let report_error ppf = function
         "This primitive can only be applied to its argument"
   | Illegal_dyn_type(s, ty) ->
       fprintf ppf
-        "@[The type@ %a@ cannot be a dynamic type (%s)@]" Printtyp.type_expr ty s
+        "The type@ %a@ cannot be a dynamic type (%s)" Printtyp.type_expr ty s
 
 let () =
   Location.register_error_of_exn
