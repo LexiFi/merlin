@@ -441,7 +441,7 @@ rule token state = parse
   | raw_ident_escape (lowercase identchar * as name)
       { return (LIDENT name) }
   | "effect" as name (* LEXIFI *)
-      { Location.alert ~kind:"future-keyword" (Location.curr lexbuf) "identifier will become keyword in 5.3";
+      { Location.alert ~kind:"future_keyword" (Location.curr lexbuf) "identifier will become keyword in 5.3.";
         return (LIDENT name) }
   | lowercase identchar * as name
     { return (try Hashtbl.find state.keywords name
