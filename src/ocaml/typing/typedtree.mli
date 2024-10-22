@@ -274,7 +274,6 @@ and expression_desc =
   | Texp_lazy of expression
   | Texp_object of class_structure * string list
   | Texp_pack of module_expr
-  | Texp_typath of typath_step list (* LEXIFI *)
   | Texp_letop of {
       let_ : binding_op;
       ands : binding_op list;
@@ -287,13 +286,6 @@ and expression_desc =
   | Texp_open of open_declaration * expression
         (** let open[!] M in e *)
   | Texp_hole
-
-and typath_step =
-  | Ttypath_constructor of Longident.t loc * int
-  | Ttypath_field of Longident.t loc
-  | Ttypath_tuple of int * int
-  | Ttypath_list of expression
-  | Ttypath_array of expression
 
 and meth =
     Tmeth_name of string

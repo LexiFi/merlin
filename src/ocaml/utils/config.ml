@@ -46,7 +46,7 @@ and cmxa_magic_number =
 and ast_impl_magic_number = "Caml1999M031"
 and ast_intf_magic_number = "Caml1999N031"
 and cmxs_magic_number = "Caml1999D031"
-and cmt_magic_number = "Mlfi1999T031"
+and cmt_magic_number = "Caml1999T031"
 
 let interface_suffix = ref ".mli"
 

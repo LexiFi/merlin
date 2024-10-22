@@ -64,8 +64,6 @@ let expr_tail_positions = function
     -> [Expression e]
   | Texp_ifthenelse (_,e1,Some e2)
     -> [Expression e1; Expression e2]
-  | Texp_typath _ ->
-    []
 
 
 let tail_positions = function

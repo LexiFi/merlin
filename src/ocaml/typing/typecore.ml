@@ -2588,8 +2588,7 @@ let rec is_nonexpansive exp =
   | Texp_override _
   | Texp_letexception _
   | Texp_letop _
-  | Texp_extension_constructor _
-  | Texp_typath _ ->
+  | Texp_extension_constructor _ ->
     false
 
 and is_nonexpansive_mod mexp =
@@ -2832,7 +2831,7 @@ let check_partial_application ~statement exp =
             | Texp_setinstvar _ | Texp_override _ | Texp_assert _
             | Texp_lazy _ | Texp_object _ | Texp_pack _ | Texp_unreachable
             | Texp_extension_constructor _ | Texp_ifthenelse (_, _, None)
-            | Texp_function _ | Texp_typath _ ->
+            | Texp_function _ ->
                 check_statement ()
             | Texp_match (_, cases, _) ->
                 List.iter (fun {c_rhs; _} -> check c_rhs) cases
@@ -4170,7 +4169,7 @@ and type_expect_
       let steps = Ast_helper.decode_typath ~loc payload in
       let tsteps, exp_type = type_typath env loc steps ty_expected in
       rue {
-        exp_desc = Texp_typath tsteps;
+        exp_desc = Typedynamic.Typath.encode tsteps;
         exp_loc = loc;
         exp_type;
         exp_extra = [];
@@ -4480,7 +4479,7 @@ and type_typath_step env loc alpha beta = function
       in
       let gamma = newgenvar () in
       unify_exp_types loc env (typath_type ((*instance env*) ty_res) t gamma) (typath_type alpha beta gamma);
-      Ttypath_constructor (tp, constr.cstr_arity)
+      Typedynamic.Typath.Ttypath_constructor (tp, constr.cstr_arity)
 
   | Ast_helper.Typath_field (lid, sty) ->
       let loc = lid.loc in
@@ -4502,7 +4501,7 @@ and type_typath_step env loc alpha beta = function
       let _, ty_arg, ty_res = instance_label false(*?*) label in
       let gamma = newgenvar () in
       unify_exp_types loc env (typath_type ty_res ty_arg gamma) (typath_type alpha beta gamma);
-      Ttypath_field lid
+      Typedynamic.Typath.Ttypath_field lid
 
   | Ast_helper.Typath_tuple (field, arity) ->
       if arity < 2 then
@@ -4522,7 +4521,7 @@ and type_typath_step env loc alpha beta = function
       let beta_list = newconstr Predef.path_list [beta] in
       let gamma = newgenvar () in
       unify_exp_types loc env (typath_type beta_list beta gamma) (typath_type alpha beta gamma);
-      Ttypath_list nth
+      Typedynamic.Typath.Ttypath_list nth
 
   | Ast_helper.Typath_array nth ->
       let loc = nth.pexp_loc in
@@ -4530,7 +4529,7 @@ and type_typath_step env loc alpha beta = function
       let beta_array = newconstr Predef.path_array [beta] in
       let gamma = newgenvar () in
       unify_exp_types loc env (typath_type beta_array beta gamma) (typath_type alpha beta gamma);
-      Ttypath_array nth
+      Typedynamic.Typath.Ttypath_array nth
 
 and type_ident env ?(recarg=Rejected) lid =
   let (path, desc) = Env.lookup_value ~loc:lid.loc lid.txt env in

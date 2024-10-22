@@ -263,14 +263,6 @@ let expr sub {exp_extra; exp_desc; exp_env; _} =
       sub.expr sub e
   | Texp_hole -> ()
 
-  | Texp_typath pl ->
-      let aux = function
-        | Ttypath_list e
-        | Ttypath_array e -> sub.expr sub e
-        | _ -> ()
-      in
-      List.iter aux pl
-
 let package_type sub {pack_fields; _} =
   List.iter (fun (_, p) -> sub.typ sub p) pack_fields
 

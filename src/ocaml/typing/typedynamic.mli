@@ -20,3 +20,15 @@ val build_stypes: Typedtree.structure -> unit
 val get_stype: int -> Mlfi_types.stype * Path.t list
 
 val reset: unit -> unit
+
+module Typath: sig
+  type step =
+    | Ttypath_constructor of Longident.t Location.loc * int
+    | Ttypath_field of Longident.t Location.loc
+    | Ttypath_tuple of int * int
+    | Ttypath_list of Typedtree.expression
+    | Ttypath_array of Typedtree.expression
+
+  val encode: step list -> Typedtree.expression_desc
+  val decode: Typedtree.expression -> step list option
+end

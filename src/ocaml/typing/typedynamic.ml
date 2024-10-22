@@ -504,3 +504,95 @@ let () =
       | _ ->
         None
     )
+
+module Typath = struct
+  type step =
+    | Ttypath_constructor of Longident.t Location.loc * int
+    | Ttypath_field of Longident.t Location.loc
+    | Ttypath_tuple of int * int
+    | Ttypath_list of Typedtree.expression
+    | Ttypath_array of Typedtree.expression
+
+  let dummy_type =
+    Types.create_expr (Tvar None) ~level:0 ~scope:0 ~id:0
+
+  let dummy_value_description =
+    { Types.val_type = dummy_type;
+      val_kind = Val_reg;
+      val_loc = Location.none;
+      val_attributes = [];
+      val_uid = Shape.Uid.internal_not_actually_unique }
+
+  let dummy_constructor_description =
+    { Types.cstr_name = "";
+      cstr_res = dummy_type;
+      cstr_existentials = [];
+      cstr_args = [];
+      cstr_arity = 0;
+      cstr_tag = Cstr_constant 0;
+      cstr_consts = 0;
+      cstr_nonconsts = 0;
+      cstr_generalized = false;
+      cstr_private = Private;
+      cstr_loc = Location.none;
+      cstr_attributes = [];
+      cstr_inlined = None;
+      cstr_uid = Shape.Uid.internal_not_actually_unique }
+
+  let dummy_path =
+    Path.Pident (Ident.create_persistent "")
+
+  let mkexp desc =
+    { Typedtree.exp_desc = desc;
+      exp_loc = Location.none;
+      exp_extra = [];
+      exp_type = dummy_type;
+      exp_env = Env.empty;
+      exp_attributes = [] }
+
+  let mkident lid =
+    mkexp (Texp_ident (dummy_path, lid, dummy_value_description))
+
+  let mkint n =
+    mkexp (Texp_constant (Const_int n))
+
+  let mktuple l =
+    mkexp (Texp_tuple l)
+
+  let encode = function
+    | Ttypath_constructor (lid, arity) ->
+        mktuple [mkident lid; mkint arity]
+    | Ttypath_field lid ->
+        mkident lid
+    | Ttypath_tuple (n, m) ->
+        mktuple [mkint 0; mkint n; mkint m]
+    | Ttypath_list e ->
+        mktuple [mkint 1; e]
+    | Ttypath_array e ->
+        mktuple [mkint 2; e]
+
+  let decode e =
+    match e.Typedtree.exp_desc with
+    | Texp_tuple [{exp_desc = Texp_ident (_, lid, _)}; {exp_desc = Texp_constant (Const_int n)}] ->
+        Ttypath_constructor (lid, n)
+    | Texp_ident (_, lid, _) ->
+        Ttypath_field lid
+    | Texp_tuple [{exp_desc = Texp_constant (Const_int 0)}; {exp_desc = Texp_constant (Const_int n)}; {exp_desc = Texp_constant (Const_int m)}] ->
+        Ttypath_tuple (n, m)
+    | Texp_tuple [{exp_desc = Texp_constant (Const_int 1)}; e] ->
+        Ttypath_list e
+    | Texp_tuple [{exp_desc = Texp_constant (Const_int 2)}; e] ->
+        Ttypath_array e
+    | _ ->
+        Misc.fatal_error __FUNCTION__
+
+  let encode steps =
+    Typedtree.Texp_construct (Location.mknoloc (Longident.Lident "#typath#"), dummy_constructor_description, List.map encode steps)
+
+  let decode e =
+    match e.Typedtree.exp_desc with
+    | Texp_construct ({txt = Lident "#typath#"}, _, el) ->
+        Some (List.map decode el)
+    | _ ->
+        None
+end
