@@ -323,63 +323,6 @@ let type_object =
        Env.t -> Location.t -> Parsetree.class_structure ->
          Typedtree.class_structure * string list)
 
-(* Helpers for dynamic types *)
-
-let lookup_type s =
-  try fst (Env.find_type_by_name (Longident.parse s) (Env.initial_with_auto ()))
-  with Not_found -> fatal_error ("Cannot find definition for type " ^ s)
-
-let lookup_types s =
-  try
-    let env = Env.initial_with_auto () in
-    let p, _ = Env.find_type_by_name (Longident.parse s) env in
-    let d = Env.find_type p env in
-    match d.type_manifest with
-    | Some te ->
-        begin match get_desc te with
-        | Tconstr (m, _, _) -> [m; p]
-        | _ -> [p]
-        end
-    | _ -> [p]
-  with Not_found -> fatal_error ("Cannot find definition for type " ^ s)
-
-let path_is s =
-  let l = lazy (lookup_types s) in
-  let last = Longident.last (Longident.parse s) in
-  fun p -> Path.last p = last && List.exists (Path.same p) (Lazy.force l)
-
-let ttype_path = path_is "Mlfi_types.ttype"
-let call_site_path = path_is "Mlfi_types.StackTrace.call_site"
-
-let typath_type_path = lazy (lookup_type "Mlfi_type_path.t")
-
-type auto_type =
-  | Auto_ttype of type_expr
-  | Auto_call_site
-  | Auto_none
-
-let classify_auto_type ty =
-  match get_desc ty with
-  | Tconstr(p, [t], _) when ttype_path p -> Auto_ttype t
-  | Tconstr(p, [], _) when call_site_path p -> Auto_call_site
-  | _ -> Auto_none
-
-let has_implicit ty =
-  match classify_auto_type ty with
-  | Auto_ttype _ | Auto_call_site -> true
-  | Auto_none -> false
-
-let rec copy_known_part ty =
-  match get_desc ty with
-  | Tconstr (p, tl, abbrev) ->
-      newty2 ~level:(get_level ty) (Tconstr (p, List.map copy_known_part tl, abbrev))
-  | Tarrow (l, t1, t2, c) ->
-      newty2 ~level:(get_level ty) (Tarrow (l, copy_known_part t1, copy_known_part t2, c))
-  | Ttuple tl ->
-      newty2 ~level:(get_level ty) (Ttuple (List.map copy_known_part tl))
-  | _ ->
-      ty
-
 (*
   Saving and outputting type information.
   We keep these function names short, because they have to be
@@ -387,18 +330,9 @@ let rec copy_known_part ty =
   or [Typedtree.pattern] that will end up in the typed AST.
 *)
 
-let unshare_ttype node =
-  if not !Clflags.pure_caml then
-    match get_desc node.exp_type with
-    | Tconstr (p, [_t], _) when ttype_path p ->
-        {node with exp_type = copy_known_part node.exp_type}
-    | _ -> node
-  else
-    node
-
 let re node =
   Cmt_format.add_saved_type (Cmt_format.Partial_expression node);
-  unshare_ttype node
+  node
 ;;
 let rp node =
   Cmt_format.add_saved_type (Cmt_format.Partial_pattern (Value, node));
@@ -3147,7 +3081,6 @@ and type_expect_
   (* Record the expression type before unifying it with the expected type *)
   let with_explanation = with_explanation explanation in
   let rue exp =
-    let exp = unshare_ttype exp in
     with_explanation (fun () ->
       unify_exp env (re exp) (instance ty_expected));
     exp
@@ -4165,7 +4098,8 @@ and type_expect_
       in
       re { exp with exp_extra =
              (Texp_poly cty, loc, sexp.pexp_attributes) :: exp.exp_extra }
-  | Pexp_extension ({txt="p"|"lexifi.p"}, payload) ->
+  | Pexp_extension ({txt="p"|"lexifi.p"}, payload)
+    when not !Clflags.pure_caml ->
       let steps = Ast_helper.decode_typath ~loc payload in
       let tsteps, exp_type = type_typath env loc steps ty_expected in
       rue {
@@ -4176,9 +4110,12 @@ and type_expect_
         exp_env = env;
         exp_attributes = sexp.pexp_attributes;
       }
-  | Pexp_extension ({txt="t"|"lexifi.t"}, PTyp sty) ->
-      type_expect env (Typedynamic.ttype_of ~loc sty) ty_expected_explained
-  | Pexp_extension ({txt="fields_of"}, PTyp sty) ->
+  | Pexp_extension ({txt="t"|"lexifi.t"}, PTyp sty)
+    when not !Clflags.pure_caml ->
+      let ty = (Typetexp.transl_simple_type env false sty).ctyp_type in
+      rue (Typedynamic.ttype_of env loc ty)
+  | Pexp_extension ({txt="fields_of"}, PTyp sty)
+    when not !Clflags.pure_caml ->
       let ty = (Typetexp.transl_simple_type env false sty).ctyp_type in
       let ty = Ctype.expand_head env ty in
       let mk e = Ast_helper.Exp.mk ~loc:sexp.pexp_loc e in
@@ -4410,9 +4347,6 @@ and type_expect_
            exp_attributes = sexp.pexp_attributes;
            exp_env = env }
 
-and typath_type alpha beta gamma =
-  newty (Tconstr(Lazy.force typath_type_path, [alpha; beta; gamma], ref Mnil))
-
 and type_typath env loc steps ty_expected =
   let alpha = newgenvar () in
   let beta = newgenvar () in
@@ -4431,7 +4365,7 @@ and type_typath env loc steps ty_expected =
   let fields = List.map (fun s -> {prf_desc = Rtag (Location.mknoloc s, true, []); prf_loc = Location.none; prf_attributes = []}) fields in
   let gamma = {ptyp_desc=Ptyp_variant (fields, Open, None); ptyp_loc=Location.none; ptyp_loc_stack = []; ptyp_attributes=[]} in
   let gamma = (Typetexp.transl_simple_type env true gamma).ctyp_type in
-  let exp_type = typath_type alpha beta gamma in
+  let exp_type = Typedynamic.type_type_path alpha beta gamma in
   unify_exp_types loc env exp_type ty_expected;
   let tsteps =
     let rec go alpha beta = function
@@ -4478,7 +4412,7 @@ and type_typath_step env loc alpha beta = function
         | l -> newty (Ttuple l)
       in
       let gamma = newgenvar () in
-      unify_exp_types loc env (typath_type ((*instance env*) ty_res) t gamma) (typath_type alpha beta gamma);
+      unify_exp_types loc env (Typedynamic.type_type_path ty_res t gamma) (Typedynamic.type_type_path alpha beta gamma);
       Typedynamic.Typath.Ttypath_constructor (tp, constr.cstr_arity)
 
   | Ast_helper.Typath_field (lid, sty) ->
@@ -4500,7 +4434,7 @@ and type_typath_step env loc alpha beta = function
           (Label.disambiguate Exported lid env opath) labels in
       let _, ty_arg, ty_res = instance_label false(*?*) label in
       let gamma = newgenvar () in
-      unify_exp_types loc env (typath_type ty_res ty_arg gamma) (typath_type alpha beta gamma);
+      unify_exp_types loc env (Typedynamic.type_type_path ty_res ty_arg gamma) (Typedynamic.type_type_path alpha beta gamma);
       Typedynamic.Typath.Ttypath_field lid
 
   | Ast_helper.Typath_tuple (field, arity) ->
@@ -4512,7 +4446,7 @@ and type_typath_step env loc alpha beta = function
       let subtypes = Array.to_list (Array.init arity (fun _ -> newgenvar ())) in
       let to_unify = newgenty (Ttuple subtypes) in
       let gamma = newgenvar () in
-      unify_exp_types loc env (typath_type to_unify (List.nth subtypes field) gamma) (typath_type alpha beta gamma);
+      unify_exp_types loc env (Typedynamic.type_type_path to_unify (List.nth subtypes field) gamma) (Typedynamic.type_type_path alpha beta gamma);
       Ttypath_tuple (field, arity)
 
   | Ast_helper.Typath_list nth ->
@@ -4520,7 +4454,7 @@ and type_typath_step env loc alpha beta = function
       let nth = type_expect env nth (mk_expected Predef.type_int) in
       let beta_list = newconstr Predef.path_list [beta] in
       let gamma = newgenvar () in
-      unify_exp_types loc env (typath_type beta_list beta gamma) (typath_type alpha beta gamma);
+      unify_exp_types loc env (Typedynamic.type_type_path beta_list beta gamma) (Typedynamic.type_type_path alpha beta gamma);
       Typedynamic.Typath.Ttypath_list nth
 
   | Ast_helper.Typath_array nth ->
@@ -4528,7 +4462,7 @@ and type_typath_step env loc alpha beta = function
       let nth = type_expect env nth (mk_expected Predef.type_int) in
       let beta_array = newconstr Predef.path_array [beta] in
       let gamma = newgenvar () in
-      unify_exp_types loc env (typath_type beta_array beta gamma) (typath_type alpha beta gamma);
+      unify_exp_types loc env (Typedynamic.type_type_path beta_array beta gamma) (Typedynamic.type_type_path alpha beta gamma);
       Typedynamic.Typath.Ttypath_array nth
 
 and type_ident env ?(recarg=Rejected) lid =
@@ -5236,7 +5170,7 @@ and type_application env funct sargs =
                 sargs,
                 if optional && has_non_labelled then
                   eliminate_optional_arg ()
-                else if has_non_labelled && not !Clflags.pure_caml && has_implicit ty then
+                else if has_non_labelled && Typedynamic.has_implicit env ty then
                   Some (fun () -> type_implicit_arg env funct.exp_loc ty)
                 else begin
                   (* No argument was given for this parameter, we abstract over
@@ -5966,9 +5900,9 @@ and type_implicit_arg env loc ty =
     mk (Pexp_record (fields, None))
   in
 
-  match classify_auto_type ty with
+  match Typedynamic.classify_auto_type env ty with
   | Auto_ttype t ->
-      let e = type_expect env (Typedynamic.ttype_of ~loc:ghloc (Ast_helper.Typ.any ())) (mk_expected ty) in
+      let e = Typedynamic.ttype_of env ghloc t in
       begin match get_desc t, !level_for_implicit_ttype with
       | Tvar _, None -> unify_exp env e (new_global_var ())
       | Tvar _, Some level -> unify_exp env e (newty2 ~level (Tvar None))

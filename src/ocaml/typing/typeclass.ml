@@ -1273,7 +1273,7 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
                     sargs,
                     if Btype.is_optional l && has_non_labelled then
                       eliminate_optional_arg ()
-                    else if has_non_labelled && not !Clflags.pure_caml && Typecore.has_implicit ty then
+                    else if has_non_labelled && Typedynamic.has_implicit val_env ty then
                       Some (type_implicit_arg val_env scl.pcl_loc ty)
                     else
                       None
