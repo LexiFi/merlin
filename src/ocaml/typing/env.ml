@@ -2956,12 +2956,19 @@ let lookup_ident_value ~errors ~use ~loc name env =
   | exception Not_found ->
       may_lookup_error errors loc env (Unbound_value (Lident name, No_hint))
 
+let lookup_dot_type_ref = ref (fun ~errors:_ ~use:_ ~loc:_ _l _s _env -> assert false)
+
 let lookup_ident_type ~errors ~use ~loc s env =
   match IdTbl.find_name wrap_identity ~mark:use s env.types with
   | (path, data) as res ->
       use_type ~use ~loc path data;
       res
   | exception Not_found ->
+      (* BEGIN LEXIFI *)
+      if not !Clflags.pure_caml && s = "ttype" then
+        !lookup_dot_type_ref ~errors ~use ~loc (Lident "Mlfi_types") "ttype" env
+      else
+      (* END LEXIFI *)
       may_lookup_error errors loc env (Unbound_type (Lident s))
 
 let lookup_ident_modtype ~errors ~use ~loc s env =
@@ -3149,6 +3156,9 @@ let lookup_dot_type ~errors ~use ~loc l s env =
       (path, tda)
   | exception Not_found ->
       may_lookup_error errors loc env (Unbound_type (Ldot(l, s)))
+
+let () =
+  lookup_dot_type_ref := lookup_dot_type
 
 let lookup_dot_modtype ~errors ~use ~loc l s env =
   let (p, comps) = lookup_structure_components ~errors ~use ~loc l env in

@@ -1,5 +1,5 @@
 (***************************************************************************)
-(*  Copyright (C) 2000-2022 LexiFi SAS. All rights reserved.               *)
+(*  Copyright (C) 2000-2024 LexiFi SAS. All rights reserved.               *)
 (*                                                                         *)
 (*  No part of this document may be reproduced or transmitted in any       *)
 (*  form or for any purpose without the express permission of LexiFi SAS.  *)
@@ -8,6 +8,53 @@
 open Types
 open Mlfi_types
 open Path
+open Btype
+open Asttypes
+
+let ident_typeof = Ident.create_persistent "%typeof"
+let path_typeof = Pident ident_typeof
+let path_call_site = Pdot(Pdot(Pident(Ident.create_persistent "Mlfi_types"), "StackTrace"), "call_site")
+let path_type_path = Pdot(Pident(Ident.create_persistent "Mlfi_type_path"), "t")
+let type_type_path alpha beta gamma = newgenty (Tconstr(path_type_path, [alpha; beta; gamma], ref Mnil))
+let path_ttype = Pdot(Pident(Ident.create_persistent "Mlfi_types"), "ttype")
+let type_ttype t = newgenty (Tconstr(path_ttype, [t], ref Mnil))
+
+let type_typeof =
+  lazy begin
+    let tvar = newgenvar () in
+    newgenty(Tarrow(Nolabel, Predef.type_int, newgenty(Tarrow(Nolabel, tvar, type_ttype tvar, commu_ok)), commu_ok))
+  end
+
+let val_typeof =
+  lazy
+    { val_kind = Val_prim (Primitive.simple ~name:"%typeof" ~arity:2 ~alloc:false);
+      val_type = Lazy.force type_typeof;
+      val_loc = Location.none;
+      val_attributes = [];
+      val_uid = Uid.internal_not_actually_unique }
+
+type auto_type =
+  | Auto_ttype of type_expr
+  | Auto_call_site
+  | Auto_none
+
+let classify_auto_type env ty =
+  match get_desc ty with
+  | Tconstr _ ->
+      let ty = Ctype.expand_head env ty in
+      begin match get_desc ty with
+      | Tconstr(p, [t], _) when Path.same p path_ttype -> Auto_ttype t
+      | Tconstr(p, [], _) when Path.same p path_call_site -> Auto_call_site
+      | _ -> Auto_none
+      end
+  | _ ->
+      Auto_none
+
+let has_implicit env ty =
+  not !Clflags.pure_caml &&
+  match classify_auto_type env ty with
+  | Auto_ttype _ | Auto_call_site -> true
+  | Auto_none -> false
 
 (* Compute a global name for module bindings and type declarations *)
 let root_attr s =
@@ -234,7 +281,7 @@ let stype_of_type env loc ty =
     | Tunivar _ -> errstr loc ty "univar"
     | Tarrow (label, t1, t2, _) ->
         (* TODO: should we add a '?' prefix for Optional ? *)
-        DT_arrow (Btype.label_name label, dyn ~warn rec_types t1, dyn ~warn rec_types t2)
+        DT_arrow (label_name label, dyn ~warn rec_types t1, dyn ~warn rec_types t2)
     | Ttuple tys -> DT_tuple (List.map (dyn ~warn rec_types) tys)
     | Tvariant row ->
         let Row {fields; closed; _} = row_repr row in
@@ -314,7 +361,7 @@ let stype_of_type env loc ty =
         let warn = warn && not (List.mem no_ttype_warning props) in
 
         let typexp ty =
-          Btype.keeping_props
+          keeping_props
             (fun () -> Ctype.apply env decl.type_params ty tys)
         in
 
@@ -365,7 +412,7 @@ let stype_of_type env loc ty =
               if not is_real_abstract then raise Not_found;
               let vpath, vd = Env.find_value_by_name ~use:true (Untypeast.lident_of_path path) env in
               let ttype t =
-                let p, _ = Env.find_type_by_name ~use:true (Longident.Ldot (Lident "Stdlib", "ttype")) env in
+                let p, _ = Env.find_type_by_name ~use:true (Longident.parse "Mlfi_types.ttype") env in
                 Ctype.newty (Tconstr (p, [t], ref Mnil))
               in
               let et =
@@ -465,20 +512,35 @@ let stype_of_type env loc ty =
 
 let stype_tbl = Local_store.s_table Hashtbl.create 7
 
+let decode_typeof = function
+  | {Typedtree.exp_desc =
+       Texp_apply({exp_desc = Texp_ident(_, _, {val_kind = Val_prim {prim_name = "%typeof"}})},
+                  [Nolabel, Some {exp_desc = Texp_constant(Const_int num)};
+                   Nolabel, Some {exp_type = ty}]);
+     exp_env = env;
+     exp_loc = loc} ->
+      Some (env, loc, ty, num)
+  | _ ->
+      None
+
 let build_stypes =
   let iter =
     let expr iter e =
-      match e.Typedtree.exp_desc with
-      | Texp_apply({exp_desc = Texp_ident(_path, _, {val_kind=Val_prim{prim_name="%typeof"}})},
-                   [(_, Some {exp_desc = Texp_constant (Asttypes.Const_int num); _}); (_, Some arg)]) ->
+      match decode_typeof e with
+      | Some (env, loc, ty, num) ->
           assert (not (Hashtbl.mem !stype_tbl num) || Config.merlin);
-          Hashtbl.replace !stype_tbl num (stype_of_type arg.exp_env arg.exp_loc arg.exp_type)
-      | _ ->
+          Hashtbl.replace !stype_tbl num (stype_of_type env loc ty)
+      | None ->
           Tast_iterator.default_iterator.expr iter e
     in
     {Tast_iterator.default_iterator with expr}
   in
   iter.structure iter
+
+let decode_typeof e =
+  match decode_typeof e with
+  | None -> None
+  | Some (env, _loc, _ty, num) -> Some (env, num)
 
 let get_stype num =
   match Hashtbl.find_opt !stype_tbl num with
@@ -487,12 +549,35 @@ let get_stype num =
 
 let stype_num = Local_store.s_ref (-1)
 
-let ttype_of ~loc sty =
-  let open Ast_helper in
+let rec copy_known_part ty =
+  match get_desc ty with
+  | Tconstr (p, tl, abbrev) ->
+      newty2 ~level:(get_level ty) (Tconstr (p, List.map copy_known_part tl, abbrev))
+  | Tarrow (l, t1, t2, c) ->
+      newty2 ~level:(get_level ty) (Tarrow (l, copy_known_part t1, copy_known_part t2, c))
+  | Ttuple tl ->
+      newty2 ~level:(get_level ty) (Ttuple (List.map copy_known_part tl))
+  | _ ->
+      ty
+
+let ttype_of env loc ty =
+  let open Typedtree in
   let num = incr stype_num; !stype_num in
-  Exp.apply ~loc (Exp.ident (Location.mknoloc (Longident.parse "Mlfi_types.internal_ttype_of")))
-    [ Nolabel, Exp.constant (Const.int num);
-      Nolabel, Exp.constraint_ ~loc (Exp.assert_ ~loc (Exp.construct ~loc (Location.mknoloc (Longident.Lident "false")) None)) sty]
+  let mk desc ty =
+    { exp_desc = desc;
+      exp_loc = loc;
+      exp_type = Ctype.instance ty;
+      exp_extra = [];
+      exp_env = env;
+      exp_attributes = [] }
+  in
+  let mkid s = Location.mknoloc (Longident.Lident s) in
+  let false_cstr = Env.find_ident_constructor Predef.ident_false env in
+  mk (Texp_apply
+        (mk (Texp_ident(path_typeof, mkid (Ident.name ident_typeof), Lazy.force val_typeof)) (Lazy.force type_typeof),
+         [Nolabel, Some(mk (Texp_constant(Const_int num)) Predef.type_int);
+          Nolabel, Some(mk (Texp_assert(mk (Texp_construct(mkid "false", false_cstr, [])) Predef.type_bool)) ty)]))
+    (type_ttype (copy_known_part ty))
 
 let reset () =
   Hashtbl.reset !stype_tbl;
@@ -509,7 +594,7 @@ let report_error ppf = function
         "This primitive can only be applied to its argument"
   | Illegal_dyn_type(s, ty) ->
       fprintf ppf
-        "@[The type@ %a@ cannot be a dynamic type (%s)@]" Printtyp.type_expr ty s
+        "The type@ %a@ cannot be a dynamic type (%s)" Printtyp.type_expr ty s
 
 let () =
   Location.register_error_of_exn
