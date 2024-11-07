@@ -332,7 +332,7 @@ let type_object =
 
 let re node =
   Cmt_format.add_saved_type (Cmt_format.Partial_expression node);
-  node
+  Typedynamic.unshare_ttype node
 ;;
 let rp node =
   Cmt_format.add_saved_type (Cmt_format.Partial_pattern (Value, node));
@@ -3081,6 +3081,7 @@ and type_expect_
   (* Record the expression type before unifying it with the expected type *)
   let with_explanation = with_explanation explanation in
   let rue exp =
+    let exp = Typedynamic.unshare_ttype exp in
     with_explanation (fun () ->
       unify_exp env (re exp) (instance ty_expected));
     exp

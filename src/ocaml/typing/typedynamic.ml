@@ -529,7 +529,7 @@ let build_stypes =
       match decode_typeof e with
       | Some (env, loc, ty, num) ->
           assert (not (Hashtbl.mem !stype_tbl num) || Config.merlin);
-          Hashtbl.replace !stype_tbl num (stype_of_type env loc ty)
+          Hashtbl.replace !stype_tbl num (loc, stype_of_type env loc ty)
       | None ->
           Tast_iterator.default_iterator.expr iter e
     in
@@ -544,8 +544,24 @@ let decode_typeof e =
 
 let get_stype num =
   match Hashtbl.find_opt !stype_tbl num with
-  | Some x -> x
+  | Some (_, x) -> x
   | None -> Misc.fatal_errorf "stype witness not found (num=%d)" num
+
+let dump_stypes fn =
+  let rec mkdir_rec dir =
+    if Sys.file_exists dir then ()
+    else (mkdir_rec (Filename.dirname dir); Sys.mkdir dir 0o777)
+  in
+  let styl = Hashtbl.fold (fun _ (loc, (stype, _)) accu -> (loc, stype) :: accu) !stype_tbl [] in
+  if styl <> [] then begin
+    mkdir_rec (Filename.dirname fn);
+    Out_channel.with_open_bin fn (fun oc ->
+        let ppf = Format.formatter_of_out_channel oc in
+        List.iter (fun (loc, stype) ->
+            Format.fprintf ppf "%a: %a@." Location.print_loc loc Mlfi_types.print_stype stype
+          ) styl
+      )
+  end
 
 let stype_num = Local_store.s_ref (-1)
 
@@ -577,7 +593,7 @@ let ttype_of env loc ty =
         (mk (Texp_ident(path_typeof, mkid (Ident.name ident_typeof), Lazy.force val_typeof)) (Lazy.force type_typeof),
          [Nolabel, Some(mk (Texp_constant(Const_int num)) Predef.type_int);
           Nolabel, Some(mk (Texp_assert(mk (Texp_construct(mkid "false", false_cstr, [])) Predef.type_bool)) ty)]))
-    (type_ttype (copy_known_part ty))
+    (type_ttype ty)
 
 let reset () =
   Hashtbl.reset !stype_tbl;
@@ -696,3 +712,12 @@ module Typath = struct
     | _ ->
         None
 end
+
+let unshare_ttype (node : Typedtree.expression) =
+  if not !Clflags.pure_caml then
+    match get_desc node.exp_type with
+    | Tconstr (p, [_t], _) when Path.same path_ttype p ->
+        {node with exp_type = copy_known_part node.exp_type}
+    | _ -> node
+  else
+    node

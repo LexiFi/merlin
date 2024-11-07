@@ -23,6 +23,8 @@ val build_stypes: Typedtree.structure -> unit
 
 val get_stype: int -> Mlfi_types.stype * Path.t list
 
+val dump_stypes: string -> unit
+
 val reset: unit -> unit
 
 val decode_typeof: Typedtree.expression -> (Env.t * int) option
@@ -46,3 +48,5 @@ module Typath: sig
   val encode: step list -> Typedtree.expression_desc
   val decode: Typedtree.expression -> step list option
 end
+
+val unshare_ttype: Typedtree.expression -> Typedtree.expression
