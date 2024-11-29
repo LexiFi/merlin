@@ -5,6 +5,8 @@
 (*  form or for any purpose without the express permission of LexiFi SAS.  *)
 (***************************************************************************)
 
+module Mlfi_types = Mlfi_types_internal
+
 open Types
 open Mlfi_types
 open Path
