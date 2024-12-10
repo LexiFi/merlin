@@ -75,9 +75,7 @@ type error =
   | Variant_tags of string * string
   | Invalid_variable_name of string
   | Cannot_quantify of string * type_expr
-  | Property_outside_type_declaration
   | Multiple_constraints_on_type of Longident.t
-  | Not_a_string_constant (* LEXIFI *)
   | Method_mismatch of string * type_expr * type_expr
   | Opened_object of Path.t option
   | Not_an_object of type_expr
@@ -95,7 +93,3 @@ val create_package_mty:
     Location.t -> Env.t -> Parsetree.package_type ->
     (Longident.t Asttypes.loc * Parsetree.core_type) list *
       Parsetree.module_type
-
-val approx_expr: Env.t -> Parsetree.expression -> string option
-val really_approx_expr: Env.t -> Parsetree.expression -> string
-val props_attributes:  Env.t -> Parsetree.attributes -> Parsetree.attributes

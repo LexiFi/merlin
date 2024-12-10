@@ -23,6 +23,20 @@ open Errortrace
 
 open Local_store
 
+let restore_props attrs ty =
+  if !remove_props then ty
+  else Dtype.restore_props attrs ty
+
+let restore_props_tuple attrs tyl =
+  if !remove_props then tyl
+  else Dtype.restore_props_tuple attrs tyl
+
+let diff_props attrs1 attrs2 =
+  not !remove_props &&
+  let p1 = List.flatten (Ast_helper.get_str_props attrs1) in
+  let p2 = List.flatten (Ast_helper.get_str_props attrs2) in
+  p1 <> p2
+
 (*
    Type manipulation after type inference
    ======================================
@@ -451,7 +465,7 @@ let rec free_vars_rec real ty =
         free_variables := (ty, real) :: !free_variables
     | Tconstr (path, tl, _), Some env ->
         begin try
-          let (_, body, _) = Env.find_type_expansion path env in
+          let (_, body, _, _) = Env.find_type_expansion path env in
           if get_level body <> generic_level then
             free_variables := (ty, real) :: !free_variables
         with Not_found -> ()
@@ -1023,7 +1037,6 @@ let rec copy ?partial ?keep_names scope ty =
   let copy = copy ?partial ?keep_names scope in
   match get_desc ty with
     Tsubst (ty, _) -> ty
-  | Tprop (_, ty) when !remove_props -> copy ty
   | desc ->
     let level = get_level ty in
     if level <> generic_level && partial = None then ty else
@@ -1337,7 +1350,7 @@ let rec copy_sep ~cleanup_scope ~fixed ~free ~bound ~may_share
       match desc with
         Tarrow _ | Ttuple _ | Tvariant _ | Tconstr _ | Tobject _ | Tpackage _ ->
           (get_id ty, (t, bound)) :: visited
-      | Tvar _ | Tfield _ | Tnil | Tpoly _ | Tunivar _ | Tprop _ ->
+      | Tvar _ | Tfield _ | Tnil | Tpoly _ | Tunivar _ ->
           visited
       | Tlink _ | Tsubst _ ->
           assert false
@@ -1532,9 +1545,10 @@ let expand_abbrev_gen kind find_type_expansion env ty =
             let path' = Env.normalize_type_path None env path in
             if Path.same path path' then raise Cannot_expand
             else newty2 ~level (Tconstr (path', args, abbrev))
-          | (params, body, lv) ->
+          | (params, body, lv, attrs) ->
             (* prerr_endline
               ("add a "^string_of_kind kind^" expansion for "^Path.name path);*)
+            let body = restore_props attrs body in
             let ty' =
               try
                 subst env level kind abbrev (Some ty) params args body
@@ -1638,7 +1652,7 @@ let rec extract_concrete_typedecl env ty =
                 | May_have_typedecl -> May_have_typedecl
           end
       end
-  | Tpoly(ty, _) | Tprop (_, ty) -> extract_concrete_typedecl env ty
+  | Tpoly(ty, _) -> extract_concrete_typedecl env ty
   | Tarrow _ | Ttuple _ | Tobject _ | Tfield _ | Tnil
   | Tvariant _ | Tpackage _ -> Has_no_typedecl
   | Tvar _ | Tunivar _ -> May_have_typedecl
@@ -1710,7 +1724,7 @@ let full_expand ~may_forget_scope env ty =
 *)
 let generic_abbrev env path =
   try
-    let (_, body, _) = Env.find_type_expansion path env in
+    let (_, body, _, _) = Env.find_type_expansion path env in
     get_level body = generic_level
   with
     Not_found ->
@@ -4037,15 +4051,12 @@ let rec eqtype rename type_pairs subst env t1 t2 =
           | (Tunivar _, Tunivar _) ->
               unify_univar_for Equality t1' t2' !univar_pairs
 
-
-          | (Tprop (p1, t1), Tprop (p2, t2)) when p1 = p2 ->
+          (* BEGIN LEXIFI *)
+          | Tconstr (p, [t1], _), _ when Dtype.props_of_path p <> None && !remove_props ->
               eqtype rename type_pairs subst env t1 t2
-
-                (* Remove the next two lines to get a strict semantics
-                   for type equality with properties. *)
-          | Tprop (_p, t1), _ when not !Clflags.strict_props -> eqtype rename type_pairs subst env t1 t2
-          | _, Tprop (_p, t2) when not !Clflags.strict_props -> eqtype rename type_pairs subst env t1 t2
-
+          | _, Tconstr (p, [t2], _) when Dtype.props_of_path p <> None && !remove_props ->
+              eqtype rename type_pairs subst env t1 t2
+          (* END LEXIFI *)
 
           | (_, _) ->
               raise_unexplained_for Equality
@@ -4693,8 +4704,6 @@ let rec build_subtype env (visited : transient_expr list)
       else (t, Unchanged)
   | Tunivar _ | Tpackage _ ->
       (t, Unchanged)
-  | Tprop _ ->
-      assert false
 
 let enlarge_type env ty =
   warn := false;

@@ -627,6 +627,21 @@ module Csig = struct
 end
 
 (* BEGIN LEXIFI *)
+let allowed_props =
+  ref false
+
+let check_allowed_props attrs =
+  if !allowed_props then ()
+  else
+    List.iter (function
+        | {attr_name = {txt = "t" | "lexifi.t"}; attr_loc} ->
+            Location.alert ~kind:"disallowed_prop" attr_loc "Type property not allowed here."
+        | _ -> ()
+      ) attrs
+
+let allow_props f =
+  Misc.protect_refs [R (allowed_props, true)] f
+
 let get_props (attrs : attributes) =
   List.fold_right
     (fun {attr_name = k; attr_payload = v; attr_loc} acc ->
