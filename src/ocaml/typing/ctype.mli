@@ -178,6 +178,7 @@ val instance_list: type_expr list -> type_expr list
         (* Take an instance of a list of type schemes *)
 val new_local_type:
         ?loc:Location.t ->
+        ?type_attributes:Parsetree.attribute list ->
         ?manifest_and_scope:(type_expr * int) ->
         type_origin -> type_declaration
 

@@ -43,7 +43,7 @@ let rec safe_repr v t =
 
 let rec list_of_memo = function
     Mnil -> []
-  | Mcons (_priv, p, _t1, _t2, rem) -> p :: list_of_memo rem
+  | Mcons (_priv, p, _t1, _t2, _, rem) -> p :: list_of_memo rem
   | Mlink rem -> list_of_memo !rem
 
 let print_name ppf = function
@@ -117,6 +117,11 @@ and raw_type_desc ppf = function
               fprintf ppf "Some(@,%a,@,%a)" path p raw_type_list tl)
   | Tpackage (p, fl) ->
     fprintf ppf "@[<hov1>Tpackage(@,%a,@,%a)@]" path p raw_lid_type_list fl
+  (* BEGIN LEXIFI *)
+  | Tprop (_, ty) ->
+      fprintf ppf "@[<hov1>Tprop(@,_@,%a)@]"
+        raw_type ty
+  (* END LEXIFI *)
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"
 | Some Types.Fixed_private -> fprintf ppf "Some Fixed_private"

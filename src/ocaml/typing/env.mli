@@ -54,6 +54,8 @@ type t
 
 val empty: t
 val initial: t
+val initial_with_auto_fwd: (unit -> t) ref
+val initial_with_auto: unit -> t (* LEXIFI *)
 val diff: t -> t -> Ident.t list
 
 (* approximation to the preimage equivalence class of [find_type] *)
@@ -249,9 +251,9 @@ val lookup_instance_variable:
   Path.t * Asttypes.mutable_flag * string * type_expr
 
 val find_value_by_name:
-  Longident.t -> t -> Path.t * value_description
+  ?use:bool -> Longident.t -> t -> Path.t * value_description (* LEXIFI *)
 val find_type_by_name:
-  Longident.t -> t -> Path.t * type_declaration
+  ?use:bool -> Longident.t -> t -> Path.t * type_declaration (* LEXIFI *)
 val find_module_by_name:
   Longident.t -> t -> Path.t * module_declaration
 val find_modtype_by_name:
@@ -262,7 +264,7 @@ val find_cltype_by_name:
   Longident.t -> t -> Path.t * class_type_declaration
 
 val find_constructor_by_name:
-  Longident.t -> t -> constructor_description
+  ?use:bool -> Longident.t -> t -> constructor_description (* LEXIFI *)
 val find_label_by_name:
   Longident.t -> t -> label_description
 
@@ -383,7 +385,7 @@ val enter_signature: ?mod_shape:Shape.t -> scope:int -> signature -> t ->
 (* Same as [enter_signature] but also extends the shape map ([parent_shape])
    with all the the items from the signature, their shape being a projection
    from the given shape. *)
-val enter_signature_and_shape: scope:int -> parent_shape:Shape.Map.t ->
+val enter_signature_and_shape: ?root:string (* LEXIFI *) -> scope:int -> parent_shape:Shape.Map.t ->
   Shape.t -> signature -> t -> signature * Shape.Map.t * t
 
 val enter_unbound_value : string -> value_unbound_reason -> t -> t
@@ -472,6 +474,8 @@ val set_value_used_callback:
     value_description -> (unit -> unit) -> unit
 val set_type_used_callback:
     type_declaration -> ((unit -> unit) -> unit) -> unit
+
+val store_value: Ident.t -> value_description -> t -> t (* LEXIFI *)
 
 (* Forward declaration to break mutual recursion with Includemod. *)
 val check_functor_application:

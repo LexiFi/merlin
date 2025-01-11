@@ -132,6 +132,8 @@ type type_desc =
   | Tpackage of Path.t * (Longident.t * type_expr) list
   (** Type of a first-class module (a.k.a package). *)
 
+  | Tprop of string core_type_properties * type_expr
+
 and fixed_explanation =
   | Univar of type_expr (** The row type was bound to an univar *)
   | Fixed_private (** The row type is private *)
@@ -156,7 +158,7 @@ and fixed_explanation =
 and abbrev_memo =
   | Mnil (** No known abbreviation *)
 
-  | Mcons of private_flag * Path.t * type_expr * type_expr * abbrev_memo
+  | Mcons of private_flag * Path.t * type_expr * type_expr * bool * abbrev_memo
   (** Found one abbreviation.
       A valid abbreviation should be at least as visible and reachable by the
       same path.
@@ -709,6 +711,9 @@ type label_description =
     lbl_attributes: Parsetree.attributes;
     lbl_uid: Uid.t;
   }
+
+val val_approx: value_description -> string option
+val approx_attr: string -> Parsetree.attribute
 
 (** Extracts the list of "value" identifiers bound by a signature.
     "Value" identifiers are identifiers for signature components that

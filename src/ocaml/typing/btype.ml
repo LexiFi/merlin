@@ -20,6 +20,13 @@ open Types
 
 open Local_store
 
+let remove_props = ref true (* whether copy operations remove properties *)
+
+let keeping_props f =
+  let r = !remove_props in
+  remove_props := false;
+  Misc.try_finally f ~always:(fun () ->  remove_props := r)
+
 (**** Sets, maps and hashtables of types ****)
 
 let wrap_repr f ty = f (Transient_expr.repr ty)
@@ -332,13 +339,32 @@ let fold_type_expr f init ty =
     List.fold_left f result tyl
   | Tpackage (_, fl)  ->
     List.fold_left (fun result (_n, ty) -> f result ty) init fl
+  | Tprop (_, ty)       -> f init ty
 
 let iter_type_expr f ty =
   fold_type_expr (fun () v -> f v) () ty
 
+(* BEGIN LEXIFI *)
+let has_props te =
+  let visited = Hashtbl.create 7 in
+  let rec f te =
+    let id = get_id te in
+    if Hashtbl.mem visited id then ()
+    else begin
+      Hashtbl.add visited id ();
+      match get_desc te with
+      | Tprop (_ :: _, _) -> raise Exit
+      | _ -> iter_type_expr f te
+    end
+  in
+  match f te with
+  | () -> false
+  | exception Exit -> true
+(* END LEXIFI *)
+
 let rec iter_abbrev f = function
     Mnil                   -> ()
-  | Mcons(_, _, ty, ty', rem) -> f ty; f ty'; iter_abbrev f rem
+  | Mcons(_, _, ty, ty', _, rem) -> f ty; f ty'; iter_abbrev f rem
   | Mlink rem              -> iter_abbrev f !rem
 
 let iter_type_expr_cstr_args f = function
@@ -533,6 +559,7 @@ let rec copy_type_desc ?(keep_names=false) f = function
       let tyl = List.map f tyl in
       Tpoly (f ty, tyl)
   | Tpackage (p, fl)  -> Tpackage (p, List.map (fun (n, ty) -> (n, f ty)) fl)
+  | Tprop (p, ty)       -> Tprop (p, f ty)
 
 (* TODO: rename to [module Copy_scope] *)
 module For_copy : sig
@@ -575,9 +602,9 @@ let lte_public p1 p2 =  (* Private <= Public *)
 
 let rec find_expans priv p1 = function
     Mnil -> None
-  | Mcons (priv', p2, _ty0, ty, _)
-    when lte_public priv priv' && Path.same p1 p2 -> Some ty
-  | Mcons (_, _, _, _, rem)   -> find_expans priv p1 rem
+  | Mcons (priv', p2, _ty0, ty, rp, _)
+    when lte_public priv priv' && Path.same p1 p2 && rp = !remove_props -> Some ty
+  | Mcons (_, _, _, _, _, rem)   -> find_expans priv p1 rem
   | Mlink {contents = rem} -> find_expans priv p1 rem
 
 (* debug: check for cycles in abbreviation. only works with -principal
@@ -603,7 +630,7 @@ let cleanup_abbrev () =
 
 let memorize_abbrev mem priv path v v' =
         (* Memorize the expansion of an abbreviation. *)
-  mem := Mcons (priv, path, v, v', !mem);
+  mem := Mcons (priv, path, v, v', !remove_props, !mem);
   (* check_expans [] v; *)
   memo := mem :: !memo
 
@@ -611,10 +638,10 @@ let rec forget_abbrev_rec mem path =
   match mem with
     Mnil ->
       mem
-  | Mcons (_, path', _, _, rem) when Path.same path path' ->
+  | Mcons (_, path', _, _, _, rem) when Path.same path path' ->
       rem
-  | Mcons (priv, path', v, v', rem) ->
-      Mcons (priv, path', v, v', forget_abbrev_rec rem path)
+  | Mcons (priv, path', v, v', rp, rem) ->
+      Mcons (priv, path', v, v', rp, forget_abbrev_rec rem path)
   | Mlink mem' ->
       mem' := forget_abbrev_rec !mem' path;
       raise Exit

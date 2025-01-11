@@ -110,6 +110,7 @@ let rec type_structure caught env = function
     let items, _, part_env =
       Typemod.merlin_type_structure env [ parsetree_item ]
     in
+    Typedynamic.build_stypes items;
     let typedtree_items =
       (items.Typedtree.str_items, items.Typedtree.str_type)
     in
@@ -149,6 +150,7 @@ let rec type_signature caught env = function
   | [] -> []
 
 let type_implementation config caught parsetree =
+  let parsetree = Typedynamic.assign_global_names parsetree in (* LEXIFI *)
   let { env; snapshot; ident_stamp; uid_stamp; value = prefix; index; _ } =
     get_cache config
   in
@@ -268,7 +270,7 @@ let get_errors t =
   Typecore.delayed_checks := checks;
   Msupport.catch_errors
     Mconfig.(t.config.ocaml.warnings)
-    caught Typecore.force_delayed_checks;
+    caught (fun () -> Typecore.force_delayed_checks None);
   Typecore.reset_delayed_checks ();
   !caught
 

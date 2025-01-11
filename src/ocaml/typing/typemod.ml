@@ -2338,7 +2338,7 @@ and type_module_aux ~alias sttn funct_body anchor env smod =
               let md_uid =  Uid.mk ~current_unit:(Env.get_current_unit ()) in
               let arg_md =
                 { md_type = mty.mty_type;
-                  md_attributes = [];
+                  md_attributes = [Ast_helper.Attr.mk (mknoloc "#funarg#") (PStr[])];
                   md_loc = param.loc;
                   md_uid;
                 }
@@ -2933,9 +2933,18 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
           (map_rec
             (fun rs cls ->
               let open Typeclass in
+              let cls_obj_abbr = cls.cls_obj_abbr in
+              let cls_obj_abbr = {cls_obj_abbr with
+                                  type_attributes = {
+                                    attr_name=mknoloc "#class";
+                                    attr_payload=PStr[];
+                                    attr_loc=Location.none
+                                  } :: cls_obj_abbr.type_attributes
+                                 }
+              in
               [Sig_class(cls.cls_id, cls.cls_decl, rs, Exported);
                Sig_class_type(cls.cls_ty_id, cls.cls_ty_decl, rs, Exported);
-               Sig_type(cls.cls_obj_id, cls.cls_obj_abbr, rs, Exported)
+               Sig_type(cls.cls_obj_id, cls_obj_abbr, rs, Exported)
               ])
              classes []),
         shape_map,
@@ -2976,10 +2985,17 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
           Builtin_attributes.warning_scope sincl.pincl_attributes
             (fun () -> type_module true funct_body None env smodl)
         in
+        (* BEGIN LEXIFI *)
+        let root =
+          match modl.mod_desc with
+          | Tmod_ident (p, _) -> Typedynamic.full_name_mod ~lax:false env p
+          | _ -> "*INCLUDED*"
+        in
+        (* END LEXIFI *)
         let scope = Ctype.create_scope () in
         (* Rename all identifiers bound by this signature to avoid clashes *)
         let sg, shape, new_env =
-          Env.enter_signature_and_shape ~scope ~parent_shape:shape_map
+          Env.enter_signature_and_shape ~root (* LEXIFI *) ~scope ~parent_shape:shape_map
             modl_shape (extract_sig_open env smodl.pmod_loc modl.mod_type) env
         in
         let new_env = Env.update_short_paths new_env in
@@ -3027,6 +3043,7 @@ and type_structure ?(toplevel = false) ?(keep_warnings = false) funct_body ancho
       str, sg, names, Shape.str shape_map, final_env)
 
 let type_toplevel_phrase env s =
+  Typedynamic.reset (); (* LEXIFI *)
   Env.reset_required_globals ();
   let (str, sg, _to_remove_from_sg, shape, env) =
     type_structure ~toplevel:true false None env s
@@ -3218,6 +3235,9 @@ let gen_annot target annots =
 *)
 
 let type_implementation target initial_env ast =
+  (* BEGIN LEXIFI *)
+  let ast = Typedynamic.assign_global_names ast in
+  (* END LEXIFI *)
   let sourcefile = Unit_info.source_file target in
   let save_cmt target annots initial_env cmi shape =
     Cmt_format.save_cmt (Unit_info.cmt target)
@@ -3227,6 +3247,7 @@ let type_implementation target initial_env ast =
   Cmt_format.clear ();
   Misc.try_finally (fun () ->
       Typecore.reset_delayed_checks ();
+      Typedynamic.reset (); (* LEXIFI *)
       Env.reset_required_globals ();
       if !Clflags.print_types then (* #7656 *)
         ignore @@ Warnings.parse_options false "-32-34-37-38-60";
@@ -3238,7 +3259,7 @@ let type_implementation target initial_env ast =
       in
       let simple_sg = Signature_names.simplify finalenv names sg in
       if !Clflags.print_types then begin
-        Typecore.force_delayed_checks ();
+        Typecore.force_delayed_checks (Some str);
         let shape = Shape_reduce.local_reduce Env.empty shape in
         Printtyp.wrap_printing_env ~error:false initial_env
           Format.(fun () -> fprintf std_formatter "%a@."
@@ -3269,7 +3290,7 @@ let type_implementation target initial_env ast =
               sourcefile sg source_intf
               dclsig shape
           in
-          Typecore.force_delayed_checks ();
+          Typecore.force_delayed_checks (Some str);
           (* It is important to run these checks after the inclusion test above,
              so that value declarations which are not used internally but
              exported are not reported as being unused. *)
@@ -3291,7 +3312,7 @@ let type_implementation target initial_env ast =
           in
           check_nongen_signature finalenv simple_sg;
           normalize_signature simple_sg;
-          Typecore.force_delayed_checks ();
+          Typecore.force_delayed_checks (Some str);
           (* See comment above. Here the target signature contains all
              the values being exported. We can still capture unused
              declarations like "let x = true;; let x = 1;;", because in this

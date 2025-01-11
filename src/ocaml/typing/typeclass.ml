@@ -1265,9 +1265,12 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
                            (Asttypes.string_of_label l));
                     remaining_sargs, use_arg sarg l'
                 | None ->
+                    let has_non_labelled = List.mem_assoc Nolabel sargs in
                     sargs,
-                    if Btype.is_optional l && List.mem_assoc Nolabel sargs then
+                    if Btype.is_optional l && has_non_labelled then
                       eliminate_optional_arg ()
+                    else if has_non_labelled && Typedynamic.has_implicit val_env ty then
+                      Some (type_implicit_arg val_env scl.pcl_loc ty)
                     else
                       None
             in

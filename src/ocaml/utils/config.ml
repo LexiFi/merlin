@@ -32,7 +32,7 @@ let ext_obj = ".o_The boot compiler cannot process C objects"
 
 let exec_magic_number = "Caml1999X035"
     (* exec_magic_number is duplicated in runtime/caml/exec.h *)
-and cmi_magic_number = "Caml1999I035"
+and cmi_magic_number = "Mlfi1999I035"
 and cmo_magic_number = "Caml1999O035"
 and cma_magic_number = "Caml1999A035"
 and cmx_magic_number =

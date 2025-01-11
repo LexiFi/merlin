@@ -37,3 +37,6 @@ let fresh_env () =
     ~loc:(Location.in_file "command line")
     ~initially_opened_module
     ~open_implicit_modules:(List.rev !Clflags.open_modules)
+
+let () =
+  Env.initial_with_auto_fwd := fresh_env

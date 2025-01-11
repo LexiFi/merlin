@@ -89,6 +89,7 @@ and core_type type_expr =
         type_exprs
     in
     Typ.poly names @@ core_type type_expr
+  | Tprop (_, t) -> core_type t
   | Tpackage (path, lids_type_exprs) ->
     let loc = mknoloc (Untypeast.lident_of_path path) in
     let args =
