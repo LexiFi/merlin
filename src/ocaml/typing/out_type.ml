@@ -1113,6 +1113,7 @@ module Aliases = struct
           List.iter (fun t -> add t) tyl;
           mark_loops_rec visited ty
       | Tunivar _ -> Variable_names.reserve ty
+      | Tprop (_, ty) -> mark_loops_rec visited ty
 
   let mark_loops ty =
     mark_loops_rec [] ty
@@ -1263,6 +1264,12 @@ let rec tree_of_typexp mode ty =
               tree_of_typexp mode ty
             )) fl in
         Otyp_module (tree_of_path (Some Module_type) p, fl)
+    (* BEGIN LEXIFI *)
+    | Tprop (props, ty) ->
+        Otyp_attribute
+          (tree_of_typexp mode ty,
+           {oattr_name="t " ^ String.concat "; " (List.map (function (k, "") -> k | (k, v) -> Printf.sprintf "%s=%S" k v) props)})
+     (* END LEXIFI *)
   in
   Aliases.remove_delay px;
   alias_nongen_row mode px ty;
@@ -1673,6 +1680,13 @@ let tree_of_value_description id decl =
     | Val_prim p -> Primitive.print p vd
     | _ -> vd
   in
+  (* BEGIN LEXIFI *)
+  let vd =
+    match Types.val_approx decl with
+    | Some s -> {vd with oval_prims = [ Printf.sprintf "=%s" s ]}
+    | None -> vd
+  in
+  (* END LEXIFI *)
   Osig_value vd
 
 (* Print a class type *)

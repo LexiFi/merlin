@@ -32,6 +32,7 @@ type value_mismatch =
   | Primitive_mismatch of primitive_mismatch
   | Not_a_primitive
   | Type of Errortrace.moregen_error
+  | Value
 
 exception Dont_match of value_mismatch
 
@@ -54,6 +55,7 @@ type kind_mismatch = type_kind * type_kind
 type label_mismatch =
   | Type of Errortrace.equality_error
   | Mutability of position
+  | Properties
 
 type record_change =
   (Types.label_declaration as 'ld, 'ld, label_mismatch) Diffing_with_keys.change
@@ -68,6 +70,7 @@ type constructor_mismatch =
   | Inline_record of record_change list
   | Kind of position
   | Explicit_return_type of position
+  | Properties
 
 type extension_constructor_mismatch =
   | Constructor_privacy
@@ -103,6 +106,7 @@ type type_mismatch =
   | Variant_mismatch of variant_change list
   | Unboxed_representation of position
   | Immediate of Type_immediacy.Violation.t
+  | Properties
 
 val value_descriptions:
   loc:Location.t -> Env.t -> string ->
