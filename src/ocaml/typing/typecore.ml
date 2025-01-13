@@ -220,6 +220,7 @@ let deep_copy () =
         | Tpackage (p,ltl) ->
           Tpackage (p, List.map (fun (l, tl) -> l, copy tl) ltl)
         | Tlink _ | Tsubst _ -> assert false
+        | Tprop (props, ty) -> Tprop (props, copy ty)
       in
       Transient_expr.(set_desc (repr ty') desc);
       ty'
@@ -5968,7 +5969,7 @@ let type_binding env rec_flag spat_sexp_list =
     (fun pvb ->
        match pvb.pvb_pat with
        | {ppat_desc=Ppat_var id} ->
-           begin match Dtype.approx_expr env pvb.pvb_expr with
+           begin match Typetexp.approx_expr env pvb.pvb_expr with
            | Some s -> Hashtbl.replace approx_tbl id.txt s
            | None -> ()
            end

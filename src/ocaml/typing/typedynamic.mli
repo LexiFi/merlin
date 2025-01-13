@@ -13,8 +13,6 @@ val type_type_path: type_expr -> type_expr -> type_expr -> type_expr
 
 val assign_global_names: Parsetree.structure -> Parsetree.structure
 
-val remove_global_names: Types.signature -> Types.signature
-
 val full_name_mod: lax:bool -> Env.t -> Path.t -> string
 
 val illegal_dyn_use: Location.t -> 'a

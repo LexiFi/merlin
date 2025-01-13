@@ -48,6 +48,8 @@ type closed_flag = Closed | Open
 
 type label = string
 
+type 'a core_type_properties = (string * 'a) list
+
 type arg_label =
     Nolabel
   | Labelled of string (** [label:T -> ...] *)

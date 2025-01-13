@@ -478,11 +478,9 @@ module Csig:
   end
 
 (* BEGIN LEXIFI *)
-val allow_props: (unit -> 'a) -> 'a
-val check_allowed_props: attributes -> unit
-val type_props: type_declaration -> (string * expression) list list
-val get_props: attributes -> (string * expression) list list
-val get_str_props: attributes -> (string * string) list list
+val type_props: type_declaration -> expression core_type_properties list
+val get_props: attributes -> expression core_type_properties list
+val get_str_props: attributes -> string core_type_properties list
 val map_props: (expression -> expression) -> attributes -> attributes
 
 type typath_step =

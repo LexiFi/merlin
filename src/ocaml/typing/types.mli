@@ -132,6 +132,8 @@ type type_desc =
   | Tpackage of Path.t * (Longident.t * type_expr) list
   (** Type of a first-class module (a.k.a package). *)
 
+  | Tprop of string core_type_properties * type_expr
+
 and fixed_explanation =
   | Univar of type_expr (** The row type was bound to an univar *)
   | Fixed_private (** The row type is private *)

@@ -91,33 +91,6 @@ let assign_global_names ast =
   let map = assign_global_names (Env.get_unit_name ()) in
   map.Ast_mapper.structure map ast
 
-let rec remove_global_names sg =
-  let clean_attrs attrs =
-    List.filter (function {Parsetree.attr_name = {txt = "#root#"; _}; _} -> false | _ -> true) attrs
-  in
-  let rec clean_module_type = function
-    | Mty_signature sg -> Mty_signature (remove_global_names sg)
-    | Mty_functor (param, mty) -> Mty_functor (param, clean_module_type mty)
-    | Mty_ident _ | Mty_alias _ | Mty_for_hole as mty -> mty
-  in
-  let clean_item = function
-    | Sig_value _ | Sig_typext _ | Sig_class _ | Sig_class_type _ as item -> item
-    | Sig_modtype (id, decl, visibility) ->
-        let decl = {decl with mtd_type = Option.map clean_module_type decl.mtd_type} in
-        Sig_modtype (id, decl, visibility)
-    | Sig_type (id, decl, rec_flag, visibility) ->
-        let decl = {decl with type_attributes = clean_attrs decl.type_attributes} in
-        Sig_type (id, decl, rec_flag, visibility)
-    | Sig_module (id, presence, decl, rec_flag, visibility) ->
-        let decl =
-          {decl with
-           md_type = clean_module_type decl.md_type;
-           md_attributes = clean_attrs decl.md_attributes}
-        in
-        Sig_module (id, presence, decl, rec_flag, visibility)
-  in
-  List.map clean_item sg
-
 (* Naming of types for runtime representations *)
 let builtin_type =
   let tbl = Hashtbl.create 16 in
@@ -268,15 +241,6 @@ let no_dynamic_type =
 let no_ttype_warning =
   "no_ttype_warning", ""
 
-let extract_props ty =
-  match get_desc ty with
-  | Tconstr (path, [ty'], _) ->
-      begin match Dtype.props_of_path path with
-      | None -> [], ty
-      | Some l -> l, ty'
-      end
-  | _ -> [], ty
-
 let stype_of_type env loc ty =
 
   let memotbl = Hashtbl.create 16 in
@@ -304,15 +268,14 @@ let stype_of_type env loc ty =
     | _ -> DT_prop(props, t)
   in
   let rec dyn ~warn rec_types t =
-    let props, t = extract_props t in
-    let warn = warn && not (List.mem no_ttype_warning props) in
-    if props = [] then dyn' ~warn rec_types t else build_dt_prop props (dyn ~warn rec_types t)
-  and dyn' ~warn rec_types t =
     let (depth, rtypes) = rec_types in
     if depth > 100 then
       errstr loc ty "maximum depth exceeded, probably because of non-guarded recursion";
     let rec_types = (depth + 1, rtypes) in
     match get_desc t with
+    | Tprop (props, t) ->
+        let warn = warn && not (List.mem no_ttype_warning props) in
+        build_dt_prop props (dyn ~warn rec_types t)
     | Tvar _ ->
         errstr loc ty "type variable"
     | Tpoly (t, []) -> dyn ~warn rec_types t
@@ -399,16 +362,9 @@ let stype_of_type env loc ty =
         let props = List.flatten (Ast_helper.get_str_props decl.type_attributes) in
         let warn = warn && not (List.mem no_ttype_warning props) in
 
-        let typexp attrs ty =
+        let typexp ty =
           keeping_props
-            (fun () -> Ctype.apply env decl.type_params (Dtype.restore_props attrs ty) tys)
-        in
-        let typexp_tuple attrs tyl =
-          keeping_props
-            (fun () ->
-               List.map (fun ty -> Ctype.apply env decl.type_params ty tys)
-                 (Dtype.restore_props_tuple attrs tyl)
-            )
+            (fun () -> Ctype.apply env decl.type_params ty tys)
         in
 
         let force_abstract =
@@ -426,10 +382,10 @@ let stype_of_type env loc ty =
         in
         let type_name kind =
           match decl with
-          | {type_manifest = Some body; type_attributes = attrs} when abstract_dynamic ->
+          | {type_manifest = Some body} when abstract_dynamic ->
               (* This is used e.g. for type Ib_stdlib.variant, defined as Mlfi_isdatypes.variant, with constructors
                  exported. *)
-              begin match get_desc (typexp attrs body) with
+              begin match get_desc (typexp body) with
               | Tconstr(path, _, _) -> path_name ~lax:true ~warn Abstract loc env path
               | _ ->
                   errstr loc ty ("dynamic-abstract type does not expand to path name: " ^ Path.name path)
@@ -488,37 +444,37 @@ let stype_of_type env loc ty =
               DT_abstract (type_name Abstract, List.map (dyn ~warn rec_types) tys)
               (* else errstr "GADT existential variable" *) (* see #3480 *)
             end
-        | {type_kind = Type_abstract; type_manifest = Some body; type_attributes = attrs} when abstract_dynamic ->
-            begin match get_desc (typexp attrs body) with
+        | {type_kind = Type_abstract; type_manifest = Some body} when abstract_dynamic ->
+            begin match get_desc (typexp body) with
             | Tconstr(path, tys, _) ->
                 let ttys = List.map (dyn ~warn rec_types) tys in
                 DT_abstract (path_name ~lax:true ~warn Abstract loc env path, ttys)
             | _ -> errstr loc ty ("dynamic-abstract type does not expand to path name: " ^ Path.name path)
             end
-        | {type_kind = Type_abstract; type_manifest = Some body; type_attributes = attrs} ->
+        | {type_kind = Type_abstract; type_manifest = Some body} ->
             assert (not abstract_dynamic);
-            dyn ~warn rec_types (typexp attrs body)
+            dyn ~warn rec_types (typexp body)
         | {type_kind = Type_variant (_, Variant_unboxed) | Type_record (_, Record_unboxed _)} ->
             errstr loc ty "Unboxed types are not supported for dynamic types"
         | {type_kind = Type_variant (constrs, Variant_regular)} ->
             try_st_rec Internal.set_node_variant begin fun dyn ->
               let nconst_tag = ref 0 in
               List.map
-                (fun ({Types.cd_id = c; cd_args; cd_res = rt; cd_attributes = attrs} as cd) ->
+                (fun ({Types.cd_id = c; cd_args; cd_res = rt; cd_attributes} as cd) ->
                    let c = Ident.name c in
                    Env.mark_constructor_used Env.Positive cd;
                    if rt <> None then errstr loc ty "GADT not supported for dynamic types";
                    let ts =
                      match cd_args with
                      | Cstr_tuple [] -> C_tuple []
-                     | Cstr_tuple tyl ->
+                     | Cstr_tuple ts ->
                          incr nconst_tag;
-                         C_tuple (List.map dyn (typexp_tuple attrs tyl))
+                         C_tuple (List.map dyn (List.map typexp ts))
                      | Cstr_record fields ->
                          let fields =
                            List.map
-                             (fun {Types.ld_id=s; ld_type=ty; ld_attributes=attrs} ->
-                                (Ident.name s, List.flatten (Ast_helper.get_str_props attrs), dyn (typexp attrs ty))
+                             (fun {Types.ld_id=s; ld_type=t; ld_attributes} ->
+                                (Ident.name s, List.flatten (Ast_helper.get_str_props ld_attributes), dyn (typexp t))
                              ) fields
                          in
                          let node = Internal.create_node (Printf.sprintf "%s.%s" (type_name Concrete) c) [] in
@@ -526,15 +482,15 @@ let stype_of_type env loc ty =
                          incr nconst_tag;
                          C_inline (DT_node node)
                    in
-                   (c, List.flatten (Ast_helper.get_str_props attrs), ts)
+                   (c, List.flatten (Ast_helper.get_str_props cd_attributes), ts)
 
                 ) constrs
             end
         | {type_kind = Type_record (fields, repr)} ->
             try_st_rec Internal.set_node_record begin fun dyn ->
               List.map
-                (fun {Types.ld_id=s; ld_type=ty; ld_attributes=attrs} ->
-                   (Ident.name s, List.flatten (Ast_helper.get_str_props attrs), dyn (typexp attrs ty))
+                (fun {Types.ld_id=s; ld_type=t; ld_attributes} ->
+                   (Ident.name s, List.flatten (Ast_helper.get_str_props ld_attributes), dyn (typexp t))
                 ) fields,
               match repr with
               | Types.Record_regular -> Record_regular

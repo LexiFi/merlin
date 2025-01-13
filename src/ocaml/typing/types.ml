@@ -41,6 +41,7 @@ and type_desc =
   | Tunivar of string option
   | Tpoly of type_expr * type_expr list
   | Tpackage of Path.t * (Longident.t * type_expr) list
+  | Tprop of string core_type_properties * type_expr
 
 and row_desc =
     { row_fields: (label * row_field) list;
