@@ -924,7 +924,6 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           mark usage cstrs1;
           if equality then mark Env.Exported cstrs2
         end;
-        let err =
         Variant_diffing.compare_with_representation ~loc env
           decl1.type_params
           decl2.type_params
@@ -932,11 +931,6 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           cstrs2
           rep1
           rep2
-        in
-        if err <> None then err else
-        if diff_props decl1.type_attributes decl2.type_attributes
-        then Some Properties
-        else None
     | (Type_record(labels1,rep1), Type_record(labels2,rep2)) ->
         if mark then begin
           let mark usage lbls =
@@ -949,20 +943,21 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           mark usage labels1;
           if equality then mark Env.Exported labels2
         end;
-        let err =
         Record_diffing.compare_with_representation ~loc env
           decl1.type_params decl2.type_params
           labels1 labels2
           rep1 rep2
-        in
-        if err <> None then err else
-        if diff_props decl1.type_attributes decl2.type_attributes
-        then Some Properties
-        else None
     | (Type_open, Type_open) -> None
     | (_, _) -> Some Kind
   in
   if err <> None then err else
+  if
+    diff_props decl1.type_attributes decl2.type_attributes &&
+    not (decl2.type_kind = Type_abstract &&
+         decl2.type_manifest = None &&
+         List.flatten (Ast_helper.get_str_props decl2.type_attributes) = [])
+  then Some Properties
+  else
   let abstr = decl2.type_kind = Type_abstract && decl2.type_manifest = None in
   (* If attempt to assign a non-immediate type (e.g. string) to a type that
    * must be immediate, then we error *)

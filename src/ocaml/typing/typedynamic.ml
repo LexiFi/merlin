@@ -361,6 +361,7 @@ let stype_of_type env loc ty =
 
         let props = List.flatten (Ast_helper.get_str_props decl.type_attributes) in
         let warn = warn && not (List.mem no_ttype_warning props) in
+        let props = List.filter (fun p -> p <> no_ttype_warning) props in
 
         let typexp ty =
           keeping_props
@@ -432,7 +433,7 @@ let stype_of_type env loc ty =
               if ok then begin
                 (* Format.eprintf "Witness found for abstract type %s: %a@." type_name Location.print arg_exp_loc; *)
                 if tys <> [] then raise Not_found; (* only non-parametrized type for now *)
-                existing_type vpath
+                build_dt_prop props (existing_type vpath)
               end else begin
                 warning loc
                   (Bad_witness_for_abstract_type (full_name_typ ~lax:false env path));
@@ -441,19 +442,19 @@ let stype_of_type env loc ty =
             with Not_found ->
               (* if (try ignore (String.index type_name '#'); false with Not_found -> true) then *)
               (* TODO: warning *)
-              DT_abstract (type_name Abstract, List.map (dyn ~warn rec_types) tys)
+              build_dt_prop props (DT_abstract (type_name Abstract, List.map (dyn ~warn rec_types) tys))
               (* else errstr "GADT existential variable" *) (* see #3480 *)
             end
         | {type_kind = Type_abstract; type_manifest = Some body} when abstract_dynamic ->
             begin match get_desc (typexp body) with
             | Tconstr(path, tys, _) ->
                 let ttys = List.map (dyn ~warn rec_types) tys in
-                DT_abstract (path_name ~lax:true ~warn Abstract loc env path, ttys)
+                build_dt_prop props (DT_abstract (path_name ~lax:true ~warn Abstract loc env path, ttys))
             | _ -> errstr loc ty ("dynamic-abstract type does not expand to path name: " ^ Path.name path)
             end
         | {type_kind = Type_abstract; type_manifest = Some body} ->
             assert (not abstract_dynamic);
-            dyn ~warn rec_types (typexp body)
+            build_dt_prop props (dyn ~warn rec_types (typexp body))
         | {type_kind = Type_variant (_, Variant_unboxed) | Type_record (_, Record_unboxed _)} ->
             errstr loc ty "Unboxed types are not supported for dynamic types"
         | {type_kind = Type_variant (constrs, Variant_regular)} ->
