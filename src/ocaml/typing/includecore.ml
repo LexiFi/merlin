@@ -94,7 +94,7 @@ let value_descriptions_consistency env vd1 vd2 =
 let value_descriptions ~loc env name
     (vd1 : Types.value_description)
     (vd2 : Types.value_description) =
-  begin match val_approx vd1, val_approx vd2 with
+  begin match Dtype.val_approx vd1, Dtype.val_approx vd2 with
   | a1, (Some _ as a2) when a1 <> a2 -> raise (Dont_match Value)
   | _ -> ()
   end;
@@ -214,12 +214,6 @@ type type_mismatch =
   | Unboxed_representation of position
   | Immediate of Type_immediacy.Violation.t
   | Properties
-
-let diff_props attrs1 attrs2 =
-  !Clflags.strict_props &&
-  let p1 = List.flatten (Ast_helper.get_str_props attrs1) in
-  let p2 = List.flatten (Ast_helper.get_str_props attrs2) in
-  p1 <> p2
 
 module Style = Misc.Style
 module Fmt = Format_doc
@@ -503,7 +497,7 @@ module Record_diffing = struct
       let ord = if ld1.ld_mutable = Asttypes.Mutable then First else Second in
       Some (Mutability  ord)
     else
-    if diff_props ld1.ld_attributes ld2.ld_attributes then
+    if Ctype.diff_props ld1.ld_attributes ld2.ld_attributes then
       Some (Properties : label_mismatch)
     else
     let tl1 = params1 @ [ld1.ld_type] in
@@ -529,6 +523,14 @@ module Record_diffing = struct
             loc
             ld1.ld_attributes ld2.ld_attributes
             (Ident.name ld1.ld_id);
+          let ld1 =
+            let ld_type = Ctype.restore_props ld1.ld_attributes ld1.ld_type in
+            if ld_type != ld1.ld_type then {ld1 with ld_type} else ld1
+          in
+          let ld2 =
+            let ld_type = Ctype.restore_props ld2.ld_attributes ld2.ld_type in
+            if ld_type != ld2.ld_type then {ld2 with ld_type} else ld2
+          in
           match compare_labels env params1 params2 ld1 ld2 with
           | Some _ -> false
           (* add arguments to the parameters, cf. PR#7378 *)
@@ -655,12 +657,14 @@ end
 
 module Variant_diffing = struct
 
-  let compare_constructor_arguments ~loc env params1 params2 arg1 arg2 =
+  let compare_constructor_arguments ~loc env params1 params2 arg1 arg2 attrs1 attrs2 =
     match arg1, arg2 with
     | Types.Cstr_tuple arg1, Types.Cstr_tuple arg2 ->
         if List.length arg1 <> List.length arg2 then
           Some (Arity : constructor_mismatch)
         else begin
+        let arg1 = Ctype.restore_props_tuple attrs1 arg1 in
+        let arg2 = Ctype.restore_props_tuple attrs2 arg2 in
         (* Ctype.equal must be called on all arguments at once, cf. PR#7378 *)
         match Ctype.equal env true (params1 @ arg1) (params2 @ arg2) with
         | exception Ctype.Equality err -> Some (Type err)
@@ -674,18 +678,18 @@ module Variant_diffing = struct
     | _, Types.Cstr_record _ -> Some (Kind Second : constructor_mismatch)
 
   let compare_constructors ~loc env params1 params2 res1 res2 args1 args2 attrs1 attrs2 =
-    if diff_props attrs1 attrs2 then Some (Properties : constructor_mismatch)
+    if Ctype.diff_props attrs1 attrs2 then Some (Properties : constructor_mismatch)
     else
     match res1, res2 with
     | Some r1, Some r2 ->
         begin match Ctype.equal env true [r1] [r2] with
         | exception Ctype.Equality err -> Some (Type err)
-        | () -> compare_constructor_arguments ~loc env [r1] [r2] args1 args2
+        | () -> compare_constructor_arguments ~loc env [r1] [r2] args1 args2 attrs1 attrs2
         end
     | Some _, None -> Some (Explicit_return_type First)
     | None, Some _ -> Some (Explicit_return_type Second)
     | None, None ->
-        compare_constructor_arguments ~loc env params1 params2 args1 args2
+        compare_constructor_arguments ~loc env params1 params2 args1 args2 attrs1 attrs2
 
   let equal ~loc env params1 params2
       (cstrs1 : Types.constructor_declaration list)
@@ -976,12 +980,15 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           | () -> None
         end
     | (Some ty1, Some ty2) ->
+         let ty1 = Ctype.restore_props decl1.type_attributes ty1 in
+         let ty2 = Ctype.restore_props decl2.type_attributes ty2 in
          type_manifest env ty1 decl1.type_params ty2 decl2.type_params
            decl2.type_private decl2.type_kind
     | (None, Some ty2) ->
         let ty1 =
           Btype.newgenty (Tconstr(path, decl2.type_params, ref Mnil))
         in
+        let ty2 = Ctype.restore_props decl2.type_attributes ty2 in
         match Ctype.equal env true decl1.type_params decl2.type_params with
         | exception Ctype.Equality err -> Some (Constraint err)
         | () ->
@@ -1004,7 +1011,6 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           mark usage cstrs1;
           if equality then mark Env.Exported cstrs2
         end;
-        let err =
         Variant_diffing.compare_with_representation ~loc env
           decl1.type_params
           decl2.type_params
@@ -1012,11 +1018,6 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           cstrs2
           rep1
           rep2
-        in
-        if err <> None then err else
-        if diff_props decl1.type_attributes decl2.type_attributes
-        then Some Properties
-        else None
     | (Type_record(labels1,rep1), Type_record(labels2,rep2)) ->
         if mark then begin
           let mark usage lbls =
@@ -1029,20 +1030,21 @@ let type_declarations ?(equality = false) ~loc env ~mark name
           mark usage labels1;
           if equality then mark Env.Exported labels2
         end;
-        let err =
         Record_diffing.compare_with_representation ~loc env
           decl1.type_params decl2.type_params
           labels1 labels2
           rep1 rep2
-        in
-        if err <> None then err else
-        if diff_props decl1.type_attributes decl2.type_attributes
-        then Some Properties
-        else None
     | (Type_open, Type_open) -> None
     | (_, _) -> Some (Kind (of_kind decl1.type_kind, of_kind decl2.type_kind))
   in
   if err <> None then err else
+  if
+    Ctype.diff_props decl1.type_attributes decl2.type_attributes &&
+    not ((match decl2.type_kind with Type_abstract _ -> true | _ -> false) &&
+         decl2.type_manifest = None &&
+         List.flatten (Dtype.get_str_props decl2.type_attributes) = [])
+  then Some Properties
+  else
   let abstr = Btype.type_kind_is_abstract decl2 && decl2.type_manifest = None in
   (* If attempt to assign a non-immediate type (e.g. string) to a type that
    * must be immediate, then we error *)
@@ -1076,42 +1078,34 @@ let type_declarations ?(equality = false) ~loc env ~mark name
       decl2.type_params (List.combine decl1.type_variance decl2.type_variance)
   then None else Some Variance
 
+let with_props = ref true
+
+let without_props f =
+  Misc.protect_refs [R(with_props, false)] f
+
 let type_declarations ?equality ~loc env ~mark name decl1 path decl2 =
+  let type_declarations () = type_declarations ?equality ~loc env ~mark name decl1 path decl2 in
   let is_class =
     List.exists (fun {Parsetree.attr_name={txt}} -> txt="#class") decl1.type_attributes
     || name.[0] = '#'
   in
-(*
-  Format.printf "decl1 = %a@." (Printtyp.type_declaration (Ident.create name)) decl1;
-  List.iter (fun ({txt}, _) -> Format.printf "  %s@." txt) decl1.type_attributes;
-  Format.printf "decl2 = %a@." (Printtyp.type_declaration (Ident.create name)) decl2;
-  List.iter (fun ({txt}, _) -> Format.printf "  %s@." txt) decl2.type_attributes;
-*)
-  if !Clflags.strict_props then
-    let r = type_declarations ?equality ~loc env ~mark name decl1 path decl2 in
+  if is_class || not !with_props then
+    type_declarations ()
+  else
+    let r = Btype.keeping_props type_declarations in
     if r = None then None
     else begin
-      Clflags.strict_props := false;
-      if not is_class then begin
-(*
-        Format.printf "decl1 = %a@." (Printtyp.type_declaration (Ident.create_local name)) decl1;
-        List.iter (fun {Parsetree.attr_name={txt}} -> Format.printf "  %s@." txt) decl1.type_attributes;
-        Format.printf "decl2 = %a@." (Printtyp.type_declaration (Ident.create_local name)) decl2;
-        List.iter (fun {Parsetree.attr_name={txt}} -> Format.printf "  %s@." txt) decl2.type_attributes;
-*)
+      let r = type_declarations () in
+      if r = None then begin
+        (* Format.printf "decl1 = %a@." (Printtyp.type_declaration (Ident.create_local name)) decl1; *)
+        (* List.iter (fun {Parsetree.attr_name={txt}} -> Format.printf "  %s@." txt) decl1.type_attributes; *)
+        (* Format.printf "decl2 = %a@." (Printtyp.type_declaration (Ident.create_local name)) decl2; *)
+        (* List.iter (fun {Parsetree.attr_name={txt}} -> Format.printf "  %s@." txt) decl2.type_attributes; *)
         Location.alert ~def:decl1.type_loc ~use:decl2.type_loc ~kind:"property_change" loc
           ("Different type properties for type " ^ name);
       end;
-      Misc.try_finally
-        (fun () -> type_declarations ?equality ~loc env ~mark name decl1 path decl2)
-        ~always:(fun () -> Clflags.strict_props := true)
+      r
     end
-  else
-    type_declarations ?equality ~loc env ~mark name decl1 path decl2
-
-let type_declarations ?equality ~loc env ~mark name decl1 path decl2 =
-  Btype.keeping_props
-    (fun () -> type_declarations ?equality ~loc env ~mark name decl1 path decl2)
 
 
 (* Inclusion between extension constructors *)

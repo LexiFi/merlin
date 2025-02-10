@@ -259,7 +259,6 @@ let deep_copy () =
         | Tpoly (t,tl) -> Tpoly (copy t, List.map copy tl)
         | Tpackage (p,ltl) ->
           Tpackage (p, List.map (fun (l, tl) -> l, copy tl) ltl)
-        | Tprop (p, t) -> Tprop (p, copy t)
         | Tlink _ | Tsubst _ -> assert false
       in
       Transient_expr.(set_desc (repr ty') desc);
@@ -2996,7 +2995,7 @@ let rec type_approx env sexp =
   | Pexp_coerce (e, sty1, sty2) ->
       let ty = type_approx env e in
       type_approx_constraint env ty (Pcoerce (sty1, sty2)) ~loc
-  | Pexp_extension ({txt="lazy"|"lexifi.lazy"},PStr[{pstr_desc=Pstr_eval(e,_)}]) ->
+  | Pexp_extension ({txt="lazy"},PStr[{pstr_desc=Pstr_eval(e,_)}]) ->
       type_approx env e
   | _ -> newvar ()
 
@@ -4544,9 +4543,9 @@ and type_expect_
              (Texp_poly cty, loc, sexp.pexp_attributes) :: exp.exp_extra }
 
   (* BEGIN LEXIFI *)
-  | Pexp_extension ({txt="p"|"lexifi.p"}, payload)
+  | Pexp_extension ({txt="p"}, payload)
     when not !Clflags.pure_caml ->
-      let steps = Ast_helper.decode_typath ~loc payload in
+      let steps = Dtype.decode_typath ~loc payload in
       let tsteps, exp_type = type_typath env loc steps ty_expected in
       rue {
         exp_desc = Typedynamic.Typath.encode tsteps;
@@ -4556,7 +4555,7 @@ and type_expect_
         exp_env = env;
         exp_attributes = sexp.pexp_attributes;
       }
-  | Pexp_extension ({txt="t"|"lexifi.t"}, PTyp sty)
+  | Pexp_extension ({txt="t"}, PTyp sty)
     when not !Clflags.pure_caml ->
       let ty = (Typetexp.transl_simple_type env ~closed:false sty).ctyp_type in
       rue (Typedynamic.ttype_of env loc ty)
@@ -4592,7 +4591,7 @@ and type_expect_
             raise(Error(sexp.pexp_loc, env, Fields_of_on_bad_type))
       in
       type_expect env e (mk_expected ty_expected)
-  | Pexp_extension ({txt="lazy"|"lexifi.lazy"},PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_let _} as e, _)}])
+  | Pexp_extension ({txt="lazy"},PStr[{pstr_desc=Pstr_eval({pexp_desc=Pexp_let _} as e, _)}])
     when not !Clflags.pure_caml ->
       let e = {e with pexp_attributes = lazy_attr :: e.pexp_attributes} in
       type_expect env e ty_expected_explained
@@ -4772,11 +4771,11 @@ and type_typath env loc steps ty_expected =
   let beta = newgenvar () in
   let fields =
     match steps with
-    | [ Ast_helper.Typath_constructor _ ] -> ["Constructor"]
-    | [ Ast_helper.Typath_field _ ] -> ["Field"]
-    | [ Ast_helper.Typath_tuple _ ] -> ["Tuple"]
-    | [ Ast_helper.Typath_list _ ] -> ["List"]
-    | [ Ast_helper.Typath_array _ ] -> ["Array"]
+    | [ Dtype.Typath_constructor _ ] -> ["Constructor"]
+    | [ Dtype.Typath_field _ ] -> ["Field"]
+    | [ Dtype.Typath_tuple _ ] -> ["Tuple"]
+    | [ Dtype.Typath_list _ ] -> ["List"]
+    | [ Dtype.Typath_array _ ] -> ["Array"]
     | [] -> ["Root"]
     | _ :: _ :: _ ->
         ["Constructor";"Field";"Tuple";"List";"Array";"Root"]
@@ -4806,7 +4805,7 @@ and type_typath env loc steps ty_expected =
   tsteps, exp_type
 
 and type_typath_step env loc alpha beta = function
-  | Ast_helper.Typath_constructor (tp, sty) ->
+  | Dtype.Typath_constructor (tp, sty) ->
       let loc = tp.loc in
       begin match sty with
       | None -> ()
@@ -4835,7 +4834,7 @@ and type_typath_step env loc alpha beta = function
       unify_exp_types loc env (Typedynamic.type_type_path ty_res t gamma) (Typedynamic.type_type_path alpha beta gamma);
       Typedynamic.Typath.Ttypath_constructor (tp, constr.cstr_arity)
 
-  | Ast_helper.Typath_field (lid, sty) ->
+  | Dtype.Typath_field (lid, sty) ->
       let loc = lid.loc in
       begin match sty with
       | None -> ()
@@ -4857,7 +4856,7 @@ and type_typath_step env loc alpha beta = function
       unify_exp_types loc env (Typedynamic.type_type_path ty_res ty_arg gamma) (Typedynamic.type_type_path alpha beta gamma);
       Typedynamic.Typath.Ttypath_field lid
 
-  | Ast_helper.Typath_tuple (field, arity) ->
+  | Dtype.Typath_tuple (field, arity) ->
       if arity < 2 then
         Syntaxerr.ill_formed_ast loc "Tuples must have at least 2 components.";
       if arity <= field then
@@ -4869,7 +4868,7 @@ and type_typath_step env loc alpha beta = function
       unify_exp_types loc env (Typedynamic.type_type_path to_unify (List.nth subtypes field) gamma) (Typedynamic.type_type_path alpha beta gamma);
       Typedynamic.Typath.Ttypath_tuple (field, arity)
 
-  | Ast_helper.Typath_list nth ->
+  | Dtype.Typath_list nth ->
       let loc = nth.pexp_loc in
       let nth = type_expect env nth (mk_expected Predef.type_int) in
       let beta_list = newconstr Predef.path_list [beta] in
@@ -4877,7 +4876,7 @@ and type_typath_step env loc alpha beta = function
       unify_exp_types loc env (Typedynamic.type_type_path beta_list beta gamma) (Typedynamic.type_type_path alpha beta gamma);
       Typedynamic.Typath.Ttypath_list nth
 
-  | Ast_helper.Typath_array nth ->
+  | Dtype.Typath_array nth ->
       let loc = nth.pexp_loc in
       let nth = type_expect env nth (mk_expected Predef.type_int) in
       let beta_array = newconstr Predef.path_array [beta] in
@@ -6967,14 +6966,14 @@ let type_binding env rec_flag spat_sexp_list =
     (fun pvb ->
        match pvb.pvb_pat with
        | {ppat_desc=Ppat_var id} ->
-           begin match Typetexp.approx_expr env pvb.pvb_expr with
+           begin match Dtype.approx_expr env pvb.pvb_expr with
            | Some s -> Hashtbl.replace approx_tbl id.txt s
            | None -> ()
            end
        | _ -> ()
     ) spat_sexp_list;
   let bind id =
-    try [ Types.approx_attr (Hashtbl.find approx_tbl (Ident.name id)) ]
+    try [ Dtype.approx_attr (Hashtbl.find approx_tbl (Ident.name id)) ]
     with Not_found -> []
   in
   let (pat_exp_list, new_env) =

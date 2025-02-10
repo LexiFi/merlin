@@ -117,11 +117,6 @@ and raw_type_desc ppf = function
               fprintf ppf "Some(@,%a,@,%a)" path p raw_type_list tl)
   | Tpackage (p, fl) ->
     fprintf ppf "@[<hov1>Tpackage(@,%a,@,%a)@]" path p raw_lid_type_list fl
-  (* BEGIN LEXIFI *)
-  | Tprop (_, ty) ->
-      fprintf ppf "@[<hov1>Tprop(@,_@,%a)@]"
-        raw_type ty
-  (* END LEXIFI *)
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"
 | Some Types.Fixed_private -> fprintf ppf "Some Fixed_private"

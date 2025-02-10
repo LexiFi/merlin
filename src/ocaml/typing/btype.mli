@@ -149,8 +149,6 @@ val map_type_expr_cstr_args: (type_expr -> type_expr) ->
 
 (**** Utilities for type marking ****)
 
-val has_props: type_expr -> bool (* LEXIFI *)
-
 val mark_type: type_mark -> type_expr -> unit
         (* Mark a type recursively *)
 val mark_type_params: type_mark -> type_expr -> unit

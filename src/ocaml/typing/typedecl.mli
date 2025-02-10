@@ -106,7 +106,6 @@ type error =
   | Boxed_and_unboxed
   | Nonrec_gadt
   | Invalid_private_row_declaration of type_expr
-  | Type_properties_under_phantom_type of Ident.t
 
 exception Error of Location.t * error
 

@@ -78,6 +78,8 @@ let builtin_attrs =
   ; "warnerror"
   ; "warning"
   ; "warn_on_literal_pattern"
+  ; "t"
+  ; "val"
   ]
 
 let builtin_attrs =

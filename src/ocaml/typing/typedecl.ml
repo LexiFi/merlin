@@ -75,7 +75,6 @@ type error =
   | Boxed_and_unboxed
   | Nonrec_gadt
   | Invalid_private_row_declaration of type_expr
-  | Type_properties_under_phantom_type of Ident.t
 
 open Typedtree
 
@@ -147,12 +146,11 @@ let enter_type ?abstract_abbrevs rec_flag env sdecl (id, uid) =
   add_type ~long_path:true ~check:true id decl env
 
 (* Determine if a type's values are represented by floats at run-time. *)
-let rec is_float env ty =
+let is_float env ty =
   match Typedecl_unboxed.get_unboxed_type_representation env ty with
     Some ty' ->
       begin match get_desc ty' with
         Tconstr(p, _, _) -> Path.same p Predef.path_float
-      | Tprop (_, ty) -> is_float env ty
       | _ -> false
       end
   | _ -> false
@@ -233,8 +231,9 @@ let transl_labels env univars closed lbls =
     Builtin_attributes.warning_scope attrs
       (fun () ->
          let arg = Ast_helper.Typ.force_poly arg in
-         let cty = transl_simple_type_with_props env ?univars ~closed arg in
-         let attrs = props_attributes env attrs in
+         let cty = transl_simple_type env ?univars ~closed arg in
+         let attrs = Dtype.props_attributes env attrs in
+         let attrs = Dtype.store_props env arg attrs in (* LEXIFI *)
          {ld_id = Ident.create_local name.txt;
           ld_name = name;
           ld_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
@@ -261,7 +260,7 @@ let transl_labels env univars closed lbls =
 
 let transl_constructor_arguments env univars closed = function
   | Pcstr_tuple l ->
-      let l = List.map (transl_simple_type_with_props env ?univars ~closed) l in
+      let l = List.map (transl_simple_type env ?univars ~closed) l in
       Types.Cstr_tuple (List.map (fun t -> t.ctyp_type) l),
       Cstr_tuple l
   | Pcstr_record l ->
@@ -292,7 +291,7 @@ let make_constructor env loc type_path type_params svars sargs sret_type =
             transl_constructor_arguments env univars closed sargs
           in
           let tret_type =
-            transl_simple_type_with_props env ?univars ~closed sret_type in
+            transl_simple_type env ?univars ~closed sret_type in
           let ret_type = tret_type.ctyp_type in
           (* TODO add back type_path as a parameter ? *)
           begin match get_desc ret_type with
@@ -425,7 +424,12 @@ let transl_declaration env sdecl (id, uid) =
             make_constructor env scstr.pcd_loc (Path.Pident id) params
                              scstr.pcd_vars scstr.pcd_args scstr.pcd_res
           in
-          let attrs = props_attributes env scstr.pcd_attributes in
+          let attrs = Dtype.props_attributes env scstr.pcd_attributes in
+          let attrs =
+            match scstr.pcd_args with
+            | Pcstr_tuple styl -> Dtype.store_props_tuple env styl attrs (* LEXIFI *)
+            | Pcstr_record _ -> attrs
+          in
           let tcstr =
             { cd_id = name;
               cd_name = scstr.pcd_name;
@@ -469,11 +473,16 @@ let transl_declaration env sdecl (id, uid) =
         None -> None, None
       | Some sty ->
         let no_row = not (is_fixed_type sdecl) in
-        let cty = transl_simple_type_with_props env ~closed:no_row sty in
+        let cty = transl_simple_type env ~closed:no_row sty in
         Some cty, Some cty.ctyp_type
     in
     let arity = List.length params in
-    let type_attributes = props_attributes env sdecl.ptype_attributes in
+    let type_attributes = Dtype.props_attributes env sdecl.ptype_attributes in
+    let type_attributes =
+      match sdecl.ptype_manifest with
+      | Some body -> Dtype.store_props env body type_attributes (* LEXIFI *)
+      | None -> type_attributes
+    in
     let decl =
       { type_params = params;
         type_arity = arity;
@@ -966,7 +975,7 @@ let check_regularity ~abs_env env loc path decl to_check =
           else if to_check path' && not (List.mem path' prev_exp) then begin
             try
               (* Attempt expansion *)
-              let (params0, body0, _) = Env.find_type_expansion path' env in
+              let (params0, body0, _, _) = Env.find_type_expansion path' env in
               let (params, body) =
                 Ctype.instance_parameterized_type params0 body0 in
               begin
@@ -1240,12 +1249,16 @@ let transl_type_decl env rec_flag sdecl_list =
         raise (Error (loc, Separability err))
   in
   (* BEGIN LEXIFI *)
-  List.iter (function
-    | (id, {type_manifest = Some te; type_variance; type_loc; _})
-      when List.exists (fun var -> Variance.null = var) type_variance && Btype.has_props te ->
-        raise (Error (type_loc, Type_properties_under_phantom_type id))
-    | _ -> ()
-    ) decls;
+  List.iter2 (fun sdecl (_, decl) ->
+      match decl with
+      | {type_manifest = Some _; type_variance} ->
+          if List.exists (fun var -> Variance.null = var) type_variance then begin
+            match Dtype.has_props sdecl with
+            | None -> ()
+            | Some a -> Location.prerr_warning a.attr_loc (Warnings.Misplaced_attribute a.attr_name.txt)
+          end
+      | _ -> ()
+    ) sdecl_list decls;
   (* END LEXIFI *)
   (* Compute the final environment with variance and immediacy *)
   let final_env = add_types_to_env decls shapes env in
@@ -1652,20 +1665,11 @@ let transl_value_decl env loc valdecl =
   let v =
   match valdecl.pval_prim with
     [] when Env.is_in_signature env ->
-      let approx =
-        try Some (List.find (function {attr_name = {txt = "val"|"lexifi.val"; _}; _} -> true | _ -> false) valdecl.pval_type.ptyp_attributes)
-        with Not_found -> None
-      in
-      let approx =
-        match approx with
-        | None -> []
-        | Some {attr_payload = PStr[{pstr_desc=Pstr_eval (e, _)}]; _} ->
-            [Types.approx_attr (really_approx_expr env e)]
-        | Some _ ->
-            assert false
+      let val_attributes =
+        Dtype.add_approx_attr env valdecl.pval_type.ptyp_attributes valdecl.pval_attributes
       in
       { val_type = ty; val_kind = Val_reg; Types.val_loc = loc;
-        val_attributes = approx @ valdecl.pval_attributes;
+        val_attributes;
         val_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
       }
   | [] ->
@@ -2324,9 +2328,6 @@ let report_error_doc ppf = function
          write explicitly@]@;<1 2>%a@]"
         (Style.as_inline_code Printtyp.Doc.type_expr) ty
         (Style.as_inline_code pp_private) ty
-  | Type_properties_under_phantom_type id ->
-      fprintf ppf
-        "@[Type properties under phantom type `%s' not supported.@]" (Ident.name id)
 
 let () =
   Location.register_error_of_exn
