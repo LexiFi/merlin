@@ -156,3 +156,5 @@ val report_extension_constructor_mismatch :
   string -> string -> string ->
   Env.t ->
   extension_constructor_mismatch Format_doc.printer
+
+val without_props: (unit -> 'a) -> 'a

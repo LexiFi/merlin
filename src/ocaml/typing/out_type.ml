@@ -489,7 +489,7 @@ let rec uniq = function
 
 let rec normalize_type_path ?(cache=false) env p =
   try
-    let (params, ty, _) = Env.find_type_expansion p env in
+    let (params, ty, _, _) = Env.find_type_expansion p env in
     match get_desc ty with
       Tconstr (p1, tyl, _) ->
         if List.length params = List.length tyl
@@ -1113,7 +1113,6 @@ module Aliases = struct
           List.iter (fun t -> add t) tyl;
           mark_loops_rec visited ty
       | Tunivar _ -> Variable_names.reserve ty
-      | Tprop (_, ty) -> mark_loops_rec visited ty
 
   let mark_loops ty =
     mark_loops_rec [] ty
@@ -1181,6 +1180,16 @@ let rec tree_of_typexp mode ty =
         Otyp_arrow (lab, t1, tree_of_typexp mode ty2)
     | Ttuple tyl ->
         Otyp_tuple (tree_of_typlist mode tyl)
+    | Tconstr(p, [ty], _) when Dtype.path_is_props p ->
+        let oty = tree_of_typexp mode ty in
+        begin match Dtype.props_of_path p with
+        | None | Some [] -> oty
+        | Some l ->
+            let oattr_name =
+              "t " ^ String.concat "; " (List.map (function (k, "") -> k | (k, v) -> Printf.sprintf "%s=%S" k v) l)
+            in
+            Otyp_attribute(oty, {oattr_name})
+        end
     | Tconstr(p, tyl, _abbrev) -> begin
         match best_type_path p with
         | Nth n -> tree_of_typexp mode (apply_nth n tyl)
@@ -1264,12 +1273,6 @@ let rec tree_of_typexp mode ty =
               tree_of_typexp mode ty
             )) fl in
         Otyp_module (tree_of_path (Some Module_type) p, fl)
-    (* BEGIN LEXIFI *)
-    | Tprop (props, ty) ->
-        Otyp_attribute
-          (tree_of_typexp mode ty,
-           {oattr_name="t " ^ String.concat "; " (List.map (function (k, "") -> k | (k, v) -> Printf.sprintf "%s=%S" k v) props)})
-     (* END LEXIFI *)
   in
   Aliases.remove_delay px;
   alias_nongen_row mode px ty;
@@ -1518,6 +1521,7 @@ let tree_of_type_decl id decl =
         begin match ty_manifest with
         | None -> (Otyp_abstract, Public, false)
         | Some ty ->
+            let ty = Dtype.restore_props decl.type_attributes ty in
             tree_of_typexp Type ty, decl.type_private, false
         end
     | Type_variant (cstrs, rep) ->
@@ -1682,7 +1686,7 @@ let tree_of_value_description id decl =
   in
   (* BEGIN LEXIFI *)
   let vd =
-    match Types.val_approx decl with
+    match Dtype.val_approx decl with
     | Some s -> {vd with oval_prims = [ Printf.sprintf "=%s" s ]}
     | None -> vd
   in

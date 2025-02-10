@@ -97,9 +97,9 @@ val find_ident_constructor: Ident.t -> t -> constructor_description
 val find_ident_label: Ident.t -> t -> label_description
 
 val find_type_expansion:
-    Path.t -> t -> type_expr list * type_expr * int
+    Path.t -> t -> type_expr list * type_expr * int * Parsetree.attributes
 val find_type_expansion_opt:
-    Path.t -> t -> type_expr list * type_expr * int
+    Path.t -> t -> type_expr list * type_expr * int * Parsetree.attributes
 (* Find the manifest type information associated to a type for the sake
    of the compiler's type-based optimisations. *)
 val find_modtype_expansion: Path.t -> t -> module_type

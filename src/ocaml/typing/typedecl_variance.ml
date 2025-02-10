@@ -102,8 +102,6 @@ let compute_variance env visited vari ty =
     | Tpackage (_, fl) ->
         let v = Variance.(compose vari full) in
         List.iter (fun (_, ty) -> compute_variance_rec v ty) fl
-    | Tprop (_, ty) ->
-        compute_same ty
   in
   compute_variance_rec vari ty
 

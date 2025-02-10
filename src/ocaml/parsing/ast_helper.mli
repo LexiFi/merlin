@@ -484,20 +484,8 @@ module Csig:
   end
 
 (* BEGIN LEXIFI *)
-val type_props: type_declaration -> expression core_type_properties list
-val get_props: attributes -> expression core_type_properties list
-val get_str_props: attributes -> string core_type_properties list
-val map_props: (expression -> expression) -> attributes -> attributes
-
-type typath_step =
-  | Typath_constructor of Longident.t Location.loc * core_type option
-  | Typath_field of Longident.t Location.loc * core_type option
-  | Typath_tuple of int * int
-  | Typath_list of expression
-  | Typath_array of expression
-
-val encode_typath: typath_step list -> payload
-val decode_typath: loc:Location.t -> payload -> typath_step list
+val type_props: type_declaration -> (string * expression) list list
+val get_props: attributes -> (string * expression) list list
 (* END LEXIFI *)
 
 (** Class structures *)

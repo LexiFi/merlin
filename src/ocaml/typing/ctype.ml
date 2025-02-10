@@ -23,6 +23,31 @@ open Errortrace
 
 open Local_store
 
+let restore_props_callback = ref ignore
+
+let with_restore_props_callback f g =
+  Misc.protect_refs [R(restore_props_callback, f)] g
+
+let restore_props ?path attrs ty =
+  (* if !remove_props then ty *)
+  (* else *)
+  let ty' = Dtype.restore_props attrs ty in
+  if ty' != ty then !restore_props_callback path;
+  if !remove_props then ty else ty'
+
+let restore_props_tuple ?path attrs tyl =
+  (* if !remove_props then tyl *)
+  (* else *)
+  let tyl' = Dtype.restore_props_tuple attrs tyl in
+  if tyl' != tyl then !restore_props_callback path;
+  if !remove_props then tyl else tyl'
+
+let diff_props attrs1 attrs2 =
+  not !remove_props &&
+  let p1 = List.flatten (Dtype.get_str_props attrs1) in
+  let p2 = List.flatten (Dtype.get_str_props attrs2) in
+  p1 <> p2
+
 (*
    General notes
    =============
@@ -624,7 +649,7 @@ let free_vars ~init ~add_one ?env mark ty =
           let acc =
             match Env.find_type_expansion path env with
             | exception Not_found -> acc
-            | (_, body, _) ->
+            | (_, body, _, _) ->
                 if get_level body = generic_level then acc
                 else add_one ty kind acc
           in
@@ -774,7 +799,7 @@ let rec copy_spine copy_scope ty =
   | Tobject _
   | Tlink _
   | Tunivar _ -> ty
-  | (Tarrow _ | Tpoly _ | Ttuple _ | Tpackage _ | Tconstr _ | Tprop _) as desc ->
+  | (Tarrow _ | Tpoly _ | Ttuple _ | Tpackage _ | Tconstr _) as desc ->
       let level = get_level ty in
       if level < !current_level || level = generic_level then ty else
       let t = newgenstub ~scope:(get_scope ty) in
@@ -792,8 +817,6 @@ let rec copy_spine copy_scope ty =
           Tpackage (path, fl)
       | Tconstr (path, tyl, _) ->
           Tconstr (path, List.map copy_rec tyl, ref Mnil)
-      | Tprop (props, ty) ->
-          Tprop (props, copy_rec ty)
       | _ -> assert false
       in
       Transient_expr.set_stub_desc t desc';
@@ -1164,7 +1187,6 @@ let rec copy ?partial ?keep_names copy_scope ty =
   let copy = copy ?partial ?keep_names copy_scope in
   match get_desc ty with
     Tsubst (ty, _) -> ty
-  | Tprop (_, ty) when !remove_props -> copy ty
   | desc ->
     let level = get_level ty in
     if level <> generic_level && partial = None then ty else
@@ -1659,9 +1681,10 @@ let expand_abbrev_gen kind find_type_expansion env ty =
           let path' = Env.normalize_type_path None env path in
           if Path.same path path' then raise Cannot_expand
           else newty2 ~level (Tconstr (path', args, abbrev))
-      | (params, body, lv) ->
+      | (params, body, lv, attrs) ->
           (* prerr_endline
              ("add a "^string_of_kind kind^" expansion for "^Path.name path);*)
+          let body = restore_props ~path attrs body in
           let ty' =
             try
               subst env level kind abbrev (Some ty) params args body
@@ -1765,7 +1788,7 @@ let rec extract_concrete_typedecl env ty =
                 | May_have_typedecl -> May_have_typedecl
           end
       end
-  | Tpoly(ty, _) | Tprop (_, ty) -> extract_concrete_typedecl env ty
+  | Tpoly(ty, _) -> extract_concrete_typedecl env ty
   | Tarrow _ | Ttuple _ | Tobject _ | Tfield _ | Tnil
   | Tvariant _ | Tpackage _ -> Has_no_typedecl
   | Tvar _ | Tunivar _ -> May_have_typedecl
@@ -1833,7 +1856,7 @@ let full_expand ~may_forget_scope env ty =
 *)
 let generic_abbrev env path =
   try
-    let (_, body, _) = Env.find_type_expansion path env in
+    let (_, body, _, _) = Env.find_type_expansion path env in
     get_level body = generic_level
   with
     Not_found ->
@@ -4236,15 +4259,12 @@ let rec eqtype rename type_pairs subst env t1 t2 =
           | (Tunivar _, Tunivar _) ->
               unify_univar_for Equality t1' t2' !univar_pairs
 
-
-          | (Tprop (p1, t1), Tprop (p2, t2)) when p1 = p2 ->
+          (* BEGIN LEXIFI *)
+          | Tconstr (p, [t1], _), _ when Dtype.path_is_props p && !remove_props ->
               eqtype rename type_pairs subst env t1 t2
-
-                (* Remove the next two lines to get a strict semantics
-                   for type equality with properties. *)
-          | Tprop (_p, t1), _ when not !Clflags.strict_props -> eqtype rename type_pairs subst env t1 t2
-          | _, Tprop (_p, t2) when not !Clflags.strict_props -> eqtype rename type_pairs subst env t1 t2
-
+          | _, Tconstr (p, [t2], _) when Dtype.path_is_props p && !remove_props ->
+              eqtype rename type_pairs subst env t1 t2
+          (* END LEXIFI *)
 
           | (_, _) ->
               raise_unexplained_for Equality
@@ -4907,8 +4927,6 @@ let rec build_subtype env (visited : transient_expr list)
       else (t, Unchanged)
   | Tunivar _ | Tpackage _ ->
       (t, Unchanged)
-  | Tprop _ ->
-      assert false
 
 let enlarge_type env ty =
   warn := false;
