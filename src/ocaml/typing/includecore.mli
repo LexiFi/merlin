@@ -133,3 +133,5 @@ val report_extension_constructor_mismatch :
   string -> string -> string ->
   Env.t ->
   Format.formatter -> extension_constructor_mismatch -> unit
+
+val without_props: (unit -> 'a) -> 'a

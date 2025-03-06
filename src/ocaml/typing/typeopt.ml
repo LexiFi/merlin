@@ -78,7 +78,7 @@ let classify env ty =
   let ty = scrape_ty env ty in
   if is_immediate (Ctype.immediacy env ty) then Int
   else match get_desc ty with
-  | Tvar _ | Tunivar _ | Tprop _ ->
+  | Tvar _ | Tunivar _ ->
       Any
   | Tconstr (p, _args, _abbrev) ->
       if Path.same p Predef.path_float then Float

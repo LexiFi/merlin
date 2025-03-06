@@ -23,9 +23,7 @@ open Local_store
 let remove_props = ref true (* whether copy operations remove properties *)
 
 let keeping_props f =
-  let r = !remove_props in
-  remove_props := false;
-  Misc.try_finally f ~always:(fun () ->  remove_props := r)
+  Misc.protect_refs [R(remove_props, false)] f
 
 (**** Sets, maps and hashtables of types ****)
 
@@ -292,28 +290,9 @@ let fold_type_expr f init ty =
     List.fold_left f result tyl
   | Tpackage (_, fl)  ->
     List.fold_left (fun result (_n, ty) -> f result ty) init fl
-  | Tprop (_, ty)       -> f init ty
 
 let iter_type_expr f ty =
   fold_type_expr (fun () v -> f v) () ty
-
-(* BEGIN LEXIFI *)
-let has_props te =
-  let visited = Hashtbl.create 7 in
-  let rec f te =
-    let id = get_id te in
-    if Hashtbl.mem visited id then ()
-    else begin
-      Hashtbl.add visited id ();
-      match get_desc te with
-      | Tprop (_ :: _, _) -> raise Exit
-      | _ -> iter_type_expr f te
-    end
-  in
-  match f te with
-  | () -> false
-  | exception Exit -> true
-(* END LEXIFI *)
 
 let rec iter_abbrev f = function
     Mnil                   -> ()
@@ -484,7 +463,6 @@ let rec copy_type_desc ?(keep_names=false) f = function
       let tyl = List.map f tyl in
       Tpoly (f ty, tyl)
   | Tpackage (p, fl)  -> Tpackage (p, List.map (fun (n, ty) -> (n, f ty)) fl)
-  | Tprop (p, ty)       -> Tprop (p, f ty)
 
 (* Utilities for copying *)
 

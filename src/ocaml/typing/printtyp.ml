@@ -537,9 +537,6 @@ and raw_type_desc ppf = function
   | Tpackage (p, fl) ->
       fprintf ppf "@[<hov1>Tpackage(@,%a@,%a)@]" path p
         raw_type_list (List.map snd fl)
-  | Tprop (_, ty) ->
-      fprintf ppf "@[<hov1>Tprop(@,_@,%a)@]"
-        raw_type ty
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"
 | Some Types.Fixed_private -> fprintf ppf "Some Fixed_private"
@@ -1052,6 +1049,16 @@ let rec tree_of_typexp mode ty =
         Otyp_arrow (lab, t1, tree_of_typexp mode ty2)
     | Ttuple tyl ->
         Otyp_tuple (tree_of_typlist mode tyl)
+    | Tconstr(p, [ty], _) when Dtype.path_is_props p ->
+        let oty = tree_of_typexp mode ty in
+        begin match Dtype.props_of_path p with
+        | None | Some [] -> oty
+        | Some l ->
+            let oattr_name =
+              "t " ^ String.concat "; " (List.map (function (k, "") -> k | (k, v) -> Printf.sprintf "%s=%S" k v) l)
+            in
+            Otyp_attribute(oty, {oattr_name})
+        end
     | Tconstr(p, tyl, _abbrev) -> begin
         match best_type_path p with
         | Nth n -> tree_of_typexp mode (apply_nth n tyl)
@@ -1138,10 +1145,6 @@ let rec tree_of_typexp mode ty =
               tree_of_typexp mode ty
             )) fl in
         Otyp_module (tree_of_path Module_type p, fl)
-    | Tprop (props, ty) ->
-        Otyp_attribute
-          (tree_of_typexp mode ty,
-           {oattr_name="t " ^ String.concat "; " (List.map (function (k, "") -> k | (k, v) -> Printf.sprintf "%s=%S" k v) props)})
   in
   if List.memq px !delayed then delayed := List.filter ((!=) px) !delayed;
   if is_aliased_proxy px && aliasable ty then begin
@@ -1375,6 +1378,7 @@ let rec tree_of_type_decl id decl =
         begin match ty_manifest with
         | None -> (Otyp_abstract, Public, false)
         | Some ty ->
+            let ty = Dtype.restore_props decl.type_attributes ty in
             tree_of_typexp Type ty, decl.type_private, false
         end
     | Type_variant (cstrs, rep) ->
@@ -1535,7 +1539,7 @@ let tree_of_value_description id decl =
   in
   (* BEGIN LEXIFI *)
   let vd =
-    match Types.val_approx decl with
+    match Dtype.val_approx decl with
     | Some s -> {vd with oval_prims = [ Printf.sprintf "=%s" s ]}
     | None -> vd
   in

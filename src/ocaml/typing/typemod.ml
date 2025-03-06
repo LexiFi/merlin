@@ -2500,6 +2500,13 @@ and type_one_application ~ctx:(apply_loc,md_f,args)
             Subst.modtype (Rescope scope) subst mty_res
         | None ->
             let nondep_mty =
+              Ctype.with_restore_props_callback
+                (fun path ->
+                   Location.alert ~kind:"functor_type_props" funct.mod_loc
+                     (Printf.sprintf
+                        "Type properties introduced while expanding %s in the body of this functor application \
+                         are not included in the result."
+                        (match path with None -> "<path>" | Some path -> Path.name path))) @@ fun () ->
               match param with
               | None -> mty_res
               | Some param ->
@@ -2519,6 +2526,7 @@ and type_one_application ~ctx:(apply_loc,md_f,args)
                not sure it's worth the effort. *)
             (*
             begin match
+              Includecore.without_props @@ fun () ->
               Includemod.modtypes
                 ~loc:app_view.loc ~mark:Mark_neither env mty_res nondep_mty
             with
@@ -3262,6 +3270,8 @@ let type_implementation sourcefile outputprefix modulename initial_env ast =
           if not !Clflags.dont_write_files then begin
             let alerts = Builtin_attributes.alerts_of_str ast in
             let cmi =
+              let simple_sg = Typedynamic.remove_global_names simple_sg in (* LEXIFI *)
+              Dtype.check_signature_for_cmi simple_sg (outputprefix ^ ".cmi");
               Env.save_signature ~alerts
                 simple_sg modulename (outputprefix ^ ".cmi")
             in
@@ -3378,6 +3388,7 @@ let package_units initial_env objfiles cmifile modulename =
     (* Write packaged signature *)
     if not !Clflags.dont_write_files then begin
       let cmi =
+        Dtype.check_signature_for_cmi sg (prefix ^ ".cmi");
         Env.save_signature_with_imports ~alerts:Misc.String.Map.empty
           sg modulename
           (prefix ^ ".cmi") imports

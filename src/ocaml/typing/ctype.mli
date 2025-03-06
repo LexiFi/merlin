@@ -425,3 +425,10 @@ val package_subtype :
 
 (* Raises [Incompatible] *)
 val mcomp : Env.t -> type_expr -> type_expr -> unit
+
+(* BEGIN LEXFI *)
+val restore_props: ?path:Path.t -> Parsetree.attributes -> type_expr -> type_expr
+val restore_props_tuple: ?path:Path.t -> Parsetree.attributes -> type_expr list -> type_expr list
+val diff_props: Parsetree.attributes -> Parsetree.attributes -> bool
+val with_restore_props_callback: (Path.t option -> unit) -> (unit -> 'a) -> 'a
+(* END LEXIFI *)

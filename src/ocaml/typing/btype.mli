@@ -132,8 +132,6 @@ val map_type_expr_cstr_args: (type_expr -> type_expr) ->
   (constructor_arguments -> constructor_arguments)
 
 
-val has_props: type_expr -> bool (* LEXIFI *)
-
 type type_iterators =
   { it_signature: type_iterators -> signature -> unit;
     it_signature_item: type_iterators -> signature_item -> unit;

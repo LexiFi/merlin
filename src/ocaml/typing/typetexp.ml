@@ -42,9 +42,7 @@ type error =
   | Variant_tags of string * string
   | Invalid_variable_name of string
   | Cannot_quantify of string * type_expr
-  | Property_outside_type_declaration
   | Multiple_constraints_on_type of Longident.t
-  | Not_a_string_constant
   | Method_mismatch of string * type_expr * type_expr
   | Opened_object of Path.t option
   | Not_an_object of type_expr
@@ -58,36 +56,6 @@ let allow_props = ref false
 module TyVarMap = Misc.String.Map
 
 type variable_context = int * type_expr TyVarMap.t
-
-(* Propagation of constant expressions *)
-
-let rec approx_expr env e =
-  match e.pexp_desc with
-  | Pexp_constant (Pconst_string (s, _, _)) -> Some s
-  | Pexp_ident lid ->
-      begin
-        try
-          let (_, desc) = Env.lookup_value ~loc:lid.loc lid.txt env in
-          val_approx desc
-        with Not_found -> None (* More explicit error message? *)
-      end
-  | Pexp_apply ({pexp_desc = Pexp_ident{txt=Longident.Lident "^"}},
-                [(Nolabel, e1); (Nolabel, e2)]) ->
-      begin match approx_expr env e1 with
-      | Some s1 ->
-          begin match approx_expr env e2 with
-          | Some s2 -> Some (s1 ^ s2)
-          | _ -> None
-          end
-      | _ -> None
-      end
-  | Pexp_sequence (_, e2) -> approx_expr env e2
-  | _ -> None
-
-let really_approx_expr env e =
-  match approx_expr env e with
-  | Some s -> s
-  | None -> raise (Error (e.pexp_loc, env, Not_a_string_constant))
 
 (* Support for first-class modules. *)
 
@@ -221,31 +189,10 @@ let instance_poly_univars env loc vars =
 
 type policy = Fixed | Extensible | Univars
 
-(* BEGIN LEXIFI *)
-let add_props loc env attrs ty =
-  List.fold_left
-    (fun ty props ->
-       if not !allow_props then
-         raise(Error (loc, env, Property_outside_type_declaration));
-       let props = List.map (fun (x, e) -> (x, really_approx_expr env e)) props in
-       newty (Tprop (props, ty))
-    )
-    ty
-    (Ast_helper.get_props attrs)
-
-let props_attributes env attrs =
-  Ast_helper.map_props
-    (fun e ->
-       let s = really_approx_expr env e in
-       {e with pexp_desc = Pexp_constant(Pconst_string (s, Location.none, None))}
-    )
-    attrs
-(* END LEXIFI *)
-
 let rec transl_type env policy styp =
   Msupport.with_saved_types
     ~warning_attribute:styp.ptyp_attributes ?save_part:None
-    (fun () -> 
+    (fun () ->
        try
          transl_type_aux env policy styp
        with exn ->
@@ -261,9 +208,10 @@ let rec transl_type env policy styp =
 and transl_type_aux env policy styp =
   let loc = styp.ptyp_loc in
   let ctyp ctyp_desc ctyp_type =
-    let ctyp_type = add_props loc env styp.ptyp_attributes ctyp_type in (* LEXIFI *)
+    if not !allow_props && Ast_helper.get_props styp.ptyp_attributes <> [] then
+      Location.prerr_warning loc (Warnings.Misplaced_attribute "t");
     { ctyp_desc; ctyp_type; ctyp_env = env;
-      ctyp_loc = loc; ctyp_attributes = props_attributes env styp.ptyp_attributes }
+      ctyp_loc = loc; ctyp_attributes = styp.ptyp_attributes }
   in
   match styp.ptyp_desc with
     Ptyp_any ->
@@ -864,12 +812,8 @@ let report_error env ppf = function
       else
         fprintf ppf "it is bound to@ %a" Printtyp.type_expr v;
       fprintf ppf ".@]";
-  | Property_outside_type_declaration ->
-      fprintf ppf "A property definition cannot be used outside a type declaration."
   | Multiple_constraints_on_type s ->
       fprintf ppf "Multiple constraints for type %a" longident s
-  | Not_a_string_constant -> (* LEXIFI *)
-      fprintf ppf "Not a string constant"
   | Method_mismatch (l, ty, ty') ->
       wrap_printing_env ~error:true env (fun ()  ->
         fprintf ppf "@[<hov>Method '%s' has type %a,@ which should be %a@]"

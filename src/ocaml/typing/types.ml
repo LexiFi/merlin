@@ -41,7 +41,6 @@ and type_desc =
   | Tunivar of string option
   | Tpoly of type_expr * type_expr list
   | Tpackage of Path.t * (Longident.t * type_expr) list
-  | Tprop of string core_type_properties * type_expr
 
 and row_desc =
     { row_fields: (label * row_field) list;
@@ -427,26 +426,6 @@ type label_description =
     lbl_attributes: Parsetree.attributes;
     lbl_uid: Uid.t;
    }
-
-let val_approx vd =
-  let open Parsetree in
-  let rec loop = function
-    | {attr_name = {txt="mlfi.value_approx"};
-       attr_payload =
-         PStr [{pstr_desc=Pstr_eval
-                    ({pexp_desc =
-                        Pexp_constant (Pconst_string (s, _, _))}, _)}]; _} :: _ ->
-        Some s
-    | _ :: tl -> loop tl
-    | [] -> None
-  in
-  loop vd.val_attributes
-
-let approx_attr s =
-  let open Ast_helper in
-  let open Parsetree in
-  Attr.mk (Location.mknoloc "mlfi.value_approx")
-    (PStr [Str.eval (Exp.constant (Pconst_string (s, Location.none, None)))])
 
 let rec bound_value_identifiers = function
     [] -> []
