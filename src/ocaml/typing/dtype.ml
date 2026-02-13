@@ -35,7 +35,7 @@ let core_type_of_attributes attrs =
 
 let core_types_of_attributes tyl attrs =
   match List.find_map core_type_of_attribute attrs with
-  | Some {ptyp_desc = Ptyp_tuple styl; _} -> styl
+  | Some {ptyp_desc = Ptyp_tuple styl; _} -> List.map snd styl
   | None -> List.map (fun _ -> empty) tyl
   | Some _ -> Misc.fatal_error __FUNCTION__
 
@@ -167,8 +167,8 @@ let rec prune_core_type env sty =
       if is_empty sty1 && is_empty sty2 then empty
       else mk (Ptyp_arrow (lab, sty1, sty2))
   | Ptyp_tuple styl ->
-      let styl = List.map prune styl in
-      if List.for_all is_empty styl then empty else mk (Ptyp_tuple styl)
+      let styl = List.map (fun (_, sty) -> prune sty) styl in
+      if List.for_all is_empty styl then empty else mk (Ptyp_tuple (List.map (fun sty -> None, sty) styl))
   | Ptyp_constr (_, styl) ->
       let styl = List.map prune styl in
       if List.for_all is_empty styl then empty else mk (Ptyp_constr (no_lid, styl))
@@ -211,10 +211,10 @@ let rec prune_core_type env sty =
           ) l
       then empty
       else mk (Ptyp_variant (l, Closed, None))
-  | Ptyp_package (_, l) ->
-      let l = List.map (fun (_, sty) -> no_lid, prune sty) l in
+  | Ptyp_package {ppt_cstrs; _} ->
+      let l = List.map (fun (_, sty) -> no_lid, prune sty) ppt_cstrs in
       if List.for_all (fun (_, sty) -> is_empty sty) l then empty
-      else mk (Ptyp_package (no_lid, l))
+      else mk (Ptyp_package {ppt_path = no_lid; ppt_cstrs = l; ppt_loc = Location.none; ppt_attrs = []})
 
 let store_props env sty attrs =
   let sty = prune_core_type env sty in
@@ -222,7 +222,7 @@ let store_props env sty attrs =
   else Ast_helper.Attr.mk (Location.mknoloc "#props#") (PTyp sty) :: attrs
 
 let store_props_tuple env styl attrs =
-  store_props env (Ast_helper.Typ.tuple styl) attrs
+  store_props env (Ast_helper.Typ.tuple (List.map (fun sty -> None, sty) styl)) attrs
 
 let ident_props =
   Ident.create_persistent "Props:"
@@ -262,7 +262,7 @@ let rec restore_props (sty : Parsetree.core_type) (ty : type_expr) : type_expr =
         let ty1' = restore_props sty1 ty1 and ty2' = restore_props sty2 ty2 in
         if ty1' == ty1 && ty2' == ty2 then ty else mk (Tarrow (lab, ty1', ty2', comm))
     | Ptyp_tuple styl, Ttuple tyl ->
-        let tyl' = List.map2 restore_props styl tyl in
+        let tyl' = List.map2 (fun (_, sty) (lbl, ty) -> lbl, restore_props sty ty) styl tyl in
         if List.for_all2 (==) tyl' tyl then ty else mk (Ttuple tyl')
     | Ptyp_constr (_, styl), Tconstr (path, tyl, memo) ->
         let tyl' = List.map2 restore_props styl tyl in
@@ -331,10 +331,10 @@ let rec restore_props (sty : Parsetree.core_type) (ty : type_expr) : type_expr =
               ~name:(row_name trow)
         in
         if trow' == trow then ty else mk (Tvariant trow')
-    | Ptyp_package (_, fields), Tpackage (path, tfields) ->
-        let tfields' = List.map2 (fun (_, sty) (lid, ty) -> lid, restore_props sty ty) fields tfields in
-        if List.for_all2 (fun (_, ty') (_, ty) -> ty' == ty) tfields' tfields then ty
-        else mk (Tpackage (path, tfields'))
+    | Ptyp_package {ppt_cstrs; _}, Tpackage {pack_path; pack_cstrs} ->
+        let pack_cstrs' = List.map2 (fun (_, sty) (lid, ty) -> lid, restore_props sty ty) ppt_cstrs pack_cstrs in
+        if List.for_all2 (fun (_, ty') (_, ty) -> ty' == ty) pack_cstrs' pack_cstrs then ty
+        else mk (Tpackage {pack_path; pack_cstrs = pack_cstrs'})
     | _ ->
         ty
   in
@@ -412,7 +412,7 @@ let decode_typath ~loc payload =
         Typath_tuple (int_of_string a, int_of_string b) :: acc
     | Pexp_construct (lid, None) ->
         Typath_constructor (lid, ty_constraint) :: acc
-    | Pexp_construct ({txt=Lident"::"}, Some{pexp_desc=Pexp_tuple [e; {pexp_desc=Pexp_construct({txt=Lident"[]"}, None)}]}) ->
+    | Pexp_construct ({txt=Lident"::"}, Some{pexp_desc=Pexp_tuple [None, e; None, {pexp_desc=Pexp_construct({txt=Lident"[]"}, None)}]}) ->
         Typath_list e :: acc
     | Pexp_array [e] ->
         Typath_array e :: acc
@@ -424,9 +424,9 @@ let decode_typath ~loc payload =
     match e.pexp_desc with
     | Pexp_field (e, lid) ->
         Typath_field (lid, ty_constraint) :: outer None e
-    | Pexp_apply ({pexp_desc=Pexp_ident{txt=Ldot(Lident"String", "get")}}, [Nolabel, e1; Nolabel, e2]) ->
+    | Pexp_apply ({pexp_desc=Pexp_ident{txt=Ldot({txt=Lident"String"}, {txt="get"})}}, [Nolabel, e1; Nolabel, e2]) ->
         Typath_list e2 :: outer None e1
-    | Pexp_apply ({pexp_desc=Pexp_ident{txt=Ldot(Lident"Array", "get")}}, [Nolabel, e1; Nolabel, e2]) ->
+    | Pexp_apply ({pexp_desc=Pexp_ident{txt=Ldot({txt=Lident"Array"}, {txt="get"})}}, [Nolabel, e1; Nolabel, e2]) ->
         inner (outer None e1) ty_constraint e2
     | Pexp_constraint (e, ty_constraint) ->
         outer (Some ty_constraint) e

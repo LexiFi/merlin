@@ -98,7 +98,7 @@ let rec remove_global_names sg =
   let rec clean_module_type = function
     | Mty_signature sg -> Mty_signature (remove_global_names sg)
     | Mty_functor (param, mty) -> Mty_functor (param, clean_module_type mty)
-    | Mty_ident _ | Mty_alias _ as mty -> mty
+    | Mty_ident _ | Mty_alias _ | Mty_for_hole as mty -> mty
   in
   let clean_item = function
     | Sig_value _ | Sig_typext _ | Sig_class _ | Sig_class_type _ as item -> item
@@ -325,7 +325,7 @@ let stype_of_type env loc ty =
     | Tarrow (label, t1, t2, _) ->
         (* TODO: should we add a '?' prefix for Optional ? *)
         DT_arrow (label_name label, dyn ~warn rec_types t1, dyn ~warn rec_types t2)
-    | Ttuple tys -> DT_tuple (List.map (dyn ~warn rec_types) tys)
+    | Ttuple tys -> DT_tuple (List.map (fun (_, ty) -> dyn ~warn rec_types ty) tys)
     | Tvariant row ->
         let Row {fields; closed; _} = row_repr row in
         if not closed then errstr loc ty "open poly variant";
@@ -373,14 +373,14 @@ let stype_of_type env loc ty =
           List.sort (fun (n, _) (n', _) -> Stdlib.compare n n') fields in
         DT_object (List.map (fun (s, t) -> (s, dyn ~warn rec_types t)) fields)
     | Tsubst _ -> assert false
-    | Tpackage(path, l) ->
-        let s = Path.name path in
+    | Tpackage{pack_path; pack_cstrs} ->
+        let s = Path.name pack_path in
         let s =
-          match l with
+          match pack_cstrs with
           | [] -> s
-          | _ -> Printf.sprintf "%s with types %s" s (String.concat " " (List.map (fun (lid, _) -> String.concat "." (Longident.flatten lid)) l))
+          | _ -> Printf.sprintf "%s with types %s" s (String.concat " " (List.map (fun (lid, _) -> String.concat "." lid) pack_cstrs))
         in
-        DT_abstract(s, List.map (fun (_, ty) -> dyn ~warn rec_types ty) l)
+        DT_abstract(s, List.map (fun (_, ty) -> dyn ~warn rec_types ty) pack_cstrs)
     | Tfield(_, _, _, _) | Tnil | Tlink _ -> assert false
     | Tconstr(path, [ty_arg], _) when Path.same path Predef.path_list -> DT_list(dyn ~warn rec_types ty_arg)
     | Tconstr(path, [ty_arg], _) when Path.same path Predef.path_option -> DT_option(dyn ~warn rec_types ty_arg)
@@ -508,9 +508,9 @@ let stype_of_type env loc ty =
             try_st_rec Internal.set_node_variant begin fun dyn ->
               let nconst_tag = ref 0 in
               List.map
-                (fun ({Types.cd_id = c; cd_args; cd_res = rt; cd_attributes = attrs} as cd) ->
+                (fun {Types.cd_id = c; cd_args; cd_res = rt; cd_attributes = attrs; cd_uid = uid} ->
                    let c = Ident.name c in
-                   Env.mark_constructor_used Env.Positive cd;
+                   Env.mark_constructor_used Env.Positive uid;
                    if rt <> None then errstr loc ty "GADT not supported for dynamic types";
                    let ts =
                      match cd_args with
@@ -565,8 +565,8 @@ let stype_tbl = Local_store.s_table Hashtbl.create 7
 let decode_typeof = function
   | {Typedtree.exp_desc =
        Texp_apply({exp_desc = Texp_ident(_, _, {val_kind = Val_prim {prim_name = "%typeof"}})},
-                  [Nolabel, Some {exp_desc = Texp_constant(Const_int num)};
-                   Nolabel, Some {exp_type = ty}]);
+                  [Nolabel, Arg {exp_desc = Texp_constant(Const_int num)};
+                   Nolabel, Arg {exp_type = ty}]);
      exp_env = env;
      exp_loc = loc} ->
       Some (env, loc, ty, num)
@@ -622,7 +622,7 @@ let rec copy_known_part ty =
   | Tarrow (l, t1, t2, c) ->
       newty2 ~level:(get_level ty) (Tarrow (l, copy_known_part t1, copy_known_part t2, c))
   | Ttuple tl ->
-      newty2 ~level:(get_level ty) (Ttuple (List.map copy_known_part tl))
+      newty2 ~level:(get_level ty) (Ttuple (List.map (fun (lbl, ty) -> lbl, copy_known_part ty) tl))
   | _ ->
       ty
 
@@ -641,8 +641,8 @@ let ttype_of env loc ty =
   let false_cstr = Env.find_ident_constructor Predef.ident_false env in
   mk (Texp_apply
         (mk (Texp_ident(path_typeof, mkid (Ident.name ident_typeof), Lazy.force val_typeof)) (Lazy.force type_typeof),
-         [Nolabel, Some(mk (Texp_constant(Const_int num)) Predef.type_int);
-          Nolabel, Some(mk (Texp_assert(mk (Texp_construct(mkid "false", false_cstr, [])) Predef.type_bool, loc)) ty)]))
+         [Nolabel, Arg(mk (Texp_constant(Const_int num)) Predef.type_int);
+          Nolabel, Arg(mk (Texp_assert(mk (Texp_construct(mkid "false", false_cstr, [])) Predef.type_bool, loc)) ty)]))
     (type_ttype ty)
 
 let reset () =
@@ -688,7 +688,7 @@ module Typath = struct
       val_uid = Shape.Uid.internal_not_actually_unique }
 
   let dummy_constructor_description =
-    { Types.cstr_name = "";
+    { Data_types.cstr_name = "";
       cstr_res = dummy_type;
       cstr_existentials = [];
       cstr_args = [];
@@ -725,27 +725,27 @@ module Typath = struct
 
   let encode = function
     | Ttypath_constructor (lid, arity) ->
-        mktuple [mkident lid; mkint arity]
+        mktuple [None, mkident lid; None, mkint arity]
     | Ttypath_field lid ->
         mkident lid
     | Ttypath_tuple (n, m) ->
-        mktuple [mkint 0; mkint n; mkint m]
+        mktuple [None, mkint 0; None, mkint n; None, mkint m]
     | Ttypath_list e ->
-        mktuple [mkint 1; e]
+        mktuple [None, mkint 1; None, e]
     | Ttypath_array e ->
-        mktuple [mkint 2; e]
+        mktuple [None, mkint 2; None, e]
 
   let decode e =
     match e.Typedtree.exp_desc with
-    | Texp_tuple [{exp_desc = Texp_ident (_, lid, _)}; {exp_desc = Texp_constant (Const_int n)}] ->
+    | Texp_tuple [None, {exp_desc = Texp_ident (_, lid, _)}; None, {exp_desc = Texp_constant (Const_int n)}] ->
         Ttypath_constructor (lid, n)
     | Texp_ident (_, lid, _) ->
         Ttypath_field lid
-    | Texp_tuple [{exp_desc = Texp_constant (Const_int 0)}; {exp_desc = Texp_constant (Const_int n)}; {exp_desc = Texp_constant (Const_int m)}] ->
+    | Texp_tuple [None, {exp_desc = Texp_constant (Const_int 0)}; None, {exp_desc = Texp_constant (Const_int n)}; None, {exp_desc = Texp_constant (Const_int m)}] ->
         Ttypath_tuple (n, m)
-    | Texp_tuple [{exp_desc = Texp_constant (Const_int 1)}; e] ->
+    | Texp_tuple [None, {exp_desc = Texp_constant (Const_int 1)}; None, e] ->
         Ttypath_list e
-    | Texp_tuple [{exp_desc = Texp_constant (Const_int 2)}; e] ->
+    | Texp_tuple [None, {exp_desc = Texp_constant (Const_int 2)}; None, e] ->
         Ttypath_array e
     | _ ->
         Misc.fatal_error __FUNCTION__

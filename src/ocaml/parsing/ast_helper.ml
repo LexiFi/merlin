@@ -83,7 +83,7 @@ module Typ = struct
   let alias ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_alias (a, b))
   let variant ?loc ?attrs a b c = mk ?loc ?attrs (Ptyp_variant (a, b, c))
   let poly ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_poly (a, b))
-  let package ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_package (a, b))
+  let package ?loc ?attrs a = mk ?loc ?attrs (Ptyp_package a)
   let extension ?loc ?attrs a = mk ?loc ?attrs (Ptyp_extension a)
   let open_ ?loc ?attrs mod_ident t = mk ?loc ?attrs (Ptyp_open (mod_ident, t))
 
@@ -106,7 +106,8 @@ module Typ = struct
             Ptyp_var x
         | Ptyp_arrow (label,core_type,core_type') ->
             Ptyp_arrow(label, loop core_type, loop core_type')
-        | Ptyp_tuple lst -> Ptyp_tuple (List.map loop lst)
+        | Ptyp_tuple lst ->
+            Ptyp_tuple (List.map (fun (l, t) -> l, loop t) lst)
         | Ptyp_constr( { txt = Longident.Lident s }, [])
           when List.mem s var_names ->
             Ptyp_var s
@@ -126,8 +127,8 @@ module Typ = struct
           List.iter (fun v ->
             check_variable var_names t.ptyp_loc v.txt) string_lst;
             Ptyp_poly(string_lst, loop core_type)
-        | Ptyp_package(longident,lst) ->
-            Ptyp_package(longident,List.map (fun (n,typ) -> (n,loop typ) ) lst)
+        | Ptyp_package ptyp ->
+            Ptyp_package (loop_package_type ptyp)
         | Ptyp_open (mod_ident, core_type) ->
             Ptyp_open (mod_ident, loop core_type)
         | Ptyp_extension (s, arg) ->
@@ -150,9 +151,17 @@ module Typ = struct
             Oinherit (loop t)
       in
       { field with pof_desc; }
+    and loop_package_type ptyp =
+      { ptyp with
+        ppt_cstrs = List.map (fun (n,typ) -> (n,loop typ) ) ptyp.ppt_cstrs }
     in
     loop t
 
+  let package_type ?(loc = !default_loc) ?(attrs = []) p c =
+    {ppt_loc = loc;
+     ppt_path = p;
+     ppt_cstrs = c;
+     ppt_attrs = attrs}
 end
 
 module Pat = struct
@@ -168,7 +177,7 @@ module Pat = struct
   let alias ?loc ?attrs a b = mk ?loc ?attrs (Ppat_alias (a, b))
   let constant ?loc ?attrs a = mk ?loc ?attrs (Ppat_constant a)
   let interval ?loc ?attrs a b = mk ?loc ?attrs (Ppat_interval (a, b))
-  let tuple ?loc ?attrs a = mk ?loc ?attrs (Ppat_tuple a)
+  let tuple ?loc ?attrs a b = mk ?loc ?attrs (Ppat_tuple (a, b))
   let construct ?loc ?attrs a b = mk ?loc ?attrs (Ppat_construct (a, b))
   let variant ?loc ?attrs a b = mk ?loc ?attrs (Ppat_variant (a, b))
   let record ?loc ?attrs a b = mk ?loc ?attrs (Ppat_record (a, b))
@@ -229,7 +238,7 @@ module Exp = struct
   let poly ?loc ?attrs a b = mk ?loc ?attrs (Pexp_poly (a, b))
   let object_ ?loc ?attrs a = mk ?loc ?attrs (Pexp_object a)
   let newtype ?loc ?attrs a b = mk ?loc ?attrs (Pexp_newtype (a, b))
-  let pack ?loc ?attrs a = mk ?loc ?attrs (Pexp_pack a)
+  let pack ?loc ?attrs a b = mk ?loc ?attrs (Pexp_pack (a, b))
   let open_ ?loc ?attrs a b = mk ?loc ?attrs (Pexp_open (a, b))
   let letop ?loc ?attrs let_ ands body =
     mk ?loc ?attrs (Pexp_letop {let_; ands; body})
@@ -668,42 +677,6 @@ let get_props (attrs : attributes) =
     attrs
     []
 
-let get_str_props attrs =
-  List.map
-    (List.map
-       (function
-         | (k, {pexp_desc=Pexp_constant {pconst_desc = Pconst_string (s, _, _)}}) -> (k, s)
-         | _ -> assert false
-       )
-    )
-    (get_props attrs)
-
-let map_props f (attrs : attributes) =
-  List.map
-    (function
-      | {attr_name = {txt="t"|"lexifi.t"} as k; attr_payload = PStr[{pstr_desc=Pstr_eval(e,[])} as p]; attr_loc} ->
-          let open Longident in
-          let rec loop e =
-            match e.pexp_desc with
-            | Pexp_ident{txt=Lident _} ->
-                e
-            | Pexp_apply({pexp_desc=Pexp_ident({txt=Lident "="})} as eq,
-                         [Nolabel,({pexp_desc=Pexp_ident{txt=Lident _}} as e1); Nolabel,e2]) ->
-                {e with pexp_desc=Pexp_apply(eq,[Nolabel,e1;Nolabel,f e2])}
-            | Pexp_sequence(e1,e2) ->
-                {e with pexp_desc=Pexp_sequence(loop e1,loop e2)}
-            | _ ->
-                raise Syntaxerr.(Error (Other e.pexp_loc))
-          in
-          {attr_name = k; attr_payload = PStr[{p with pstr_desc=Pstr_eval(loop e,[])}]; attr_loc}
-      | {attr_name = {txt="t"|"lexifi.t"; _}; attr_payload = PStr[]; _} as x ->
-          x
-      | {attr_name = {txt="t"|"lexifi.t"; _}; attr_loc; _} ->
-          raise Syntaxerr.(Error (Other attr_loc))
-      | x -> x
-    )
-    attrs
-
 let type_props sdecl =
   match sdecl.ptype_kind with
   | Ptype_variant cstrs ->
@@ -712,85 +685,6 @@ let type_props sdecl =
       List.map (fun l -> List.flatten (get_props l.pld_attributes)) lbls
   | _ ->
       []
-
-type typath_step =
-  | Typath_constructor of Longident.t Location.loc * core_type option
-  | Typath_field of Longident.t Location.loc * core_type option
-  | Typath_tuple of int * int
-  | Typath_list of expression
-  | Typath_array of expression
-
-let encode_typath steps =
-  let ident lid = Exp.ident (Location.mknoloc lid) in
-  let construct lid = Exp.construct (Location.mknoloc lid) in
-  let constraint_ e = function
-    | None -> e
-    | Some cty -> Exp.constraint_ e cty
-  in
-  let rec outer = function
-    | Typath_constructor (lid, cty) ->
-        constraint_ (Exp.construct lid None) cty
-    | Typath_field (lid, cty) ->
-        constraint_ (Exp.ident lid) cty
-    | Typath_tuple (a, b) ->
-        Exp.apply (ident (Lident"/"))
-          [Nolabel, Exp.constant (Const.int a); Nolabel, Exp.constant (Const.int b)]
-    | Typath_list e ->
-        construct (Lident"::")
-          (Some (Exp.tuple [e; construct (Lident"[]") None]))
-    | Typath_array e ->
-        Exp.array [e]
-  and inner e = function
-    | Typath_field (lid, None) ->
-        Exp.field e lid
-    | Typath_list e' ->
-        Exp.apply (ident (Ldot(Lident"String", "get")))
-          [Nolabel, e; Nolabel, construct (Lident"::") (Some e')]
-    | step ->
-        Exp.apply (ident (Ldot(Lident"Array", "get")))
-          [Nolabel, e; Nolabel, outer step]
-  in
-  match steps with
-  | [] -> PStr []
-  | s :: steps ->
-      PStr[Str.eval(List.fold_left inner (outer s) steps)]
-
-let decode_typath ~loc payload =
-  let rec inner acc ty_constraint e =
-    match e.pexp_desc with
-    | Pexp_ident lid ->
-        Typath_field (lid, ty_constraint) :: acc
-    | Pexp_apply ({pexp_desc=Pexp_ident {txt=Lident"/"}},
-                  [Nolabel, {pexp_desc=Pexp_constant{pconst_desc = Pconst_integer(a,None)}};
-                   Nolabel, {pexp_desc=Pexp_constant{pconst_desc = Pconst_integer(b,None)}}]) ->
-        Typath_tuple (int_of_string a, int_of_string b) :: acc
-    | Pexp_construct (lid, None) ->
-        Typath_constructor (lid, ty_constraint) :: acc
-    | Pexp_construct ({txt=Lident"::"}, Some{pexp_desc=Pexp_tuple [e; {pexp_desc=Pexp_construct({txt=Lident"[]"}, None)}]}) ->
-        Typath_list e :: acc
-    | Pexp_array [e] ->
-        Typath_array e :: acc
-    | Pexp_constraint (e, ty_constraint) ->
-        inner acc (Some ty_constraint) e
-    | _ ->
-        raise Syntaxerr.(Error (Other e.pexp_loc))
-  and outer ty_constraint e =
-    match e.pexp_desc with
-    | Pexp_field (e, lid) ->
-        Typath_field (lid, ty_constraint) :: outer None e
-    | Pexp_apply ({pexp_desc=Pexp_ident{txt=Ldot(Lident"String", "get")}}, [Nolabel, e1; Nolabel, e2]) ->
-        Typath_list e2 :: outer None e1
-    | Pexp_apply ({pexp_desc=Pexp_ident{txt=Ldot(Lident"Array", "get")}}, [Nolabel, e1; Nolabel, e2]) ->
-        inner (outer None e1) ty_constraint e2
-    | Pexp_constraint (e, ty_constraint) ->
-        outer (Some ty_constraint) e
-    | _ ->
-        inner [] ty_constraint e
-  in
-  match payload with
-  | PStr [] -> []
-  | PStr [{pstr_desc = Pstr_eval(e,_)}] -> List.rev (outer None e)
-  | _ -> raise Syntaxerr.(Error (Other loc))
 (* END LEXIFI *)
 
 module Cstr = struct

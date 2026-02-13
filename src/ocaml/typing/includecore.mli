@@ -55,6 +55,7 @@ type kind_mismatch = type_kind * type_kind
 type label_mismatch =
   | Type of Errortrace.equality_error
   | Mutability of position
+  | Atomicity of position
   | Properties
 
 type record_change =
