@@ -3179,11 +3179,12 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 sargs =
                       (not_principal "using an optional argument here");
                   Arg (Known_arg { sarg; ty_arg; ty_arg0; wrapped_in_some })
               | None ->
-                  if optional && List.mem_assoc Nolabel sargs then begin
+                  let has_non_labelled = List.mem_assoc Nolabel sargs in
+                  if optional && has_non_labelled then begin
                     may_warn funct.exp_loc (Warnings.Non_principal_labels
                                                 "eliminated optional argument");
                     Arg (Eliminated_optional_arg { ty_arg; level = lv })
-                  end else if Typedynamic.has_implicit env ty_arg then begin
+                  end else if Typedynamic.has_implicit env ty_arg && has_non_labelled then begin
                     Arg (Implicit_arg { ty_arg = ty_arg0; env; loc = funct.exp_loc })
                   end else begin
                     (* No argument was given for this parameter, we abstract
